@@ -324,6 +324,8 @@ export function registerPtyIpc(
         // cct 手动起 cc 时也跟随「默认危险模式」。env 在 spawn 时快照 →
         // 改完开关要「重新加载标签」才对 cct 生效（渲染层自动起的 cc 则是即时生效）。
         if (s.dangerousSkipPermissions) env.TERMINAL_CC_DANGEROUS = '1'
+        // 同理，cct 手动起 cc 也跟随「思考强度」；空串 = 不注入 = 不带 --effort
+        if (s.defaults.effort) env.TERMINAL_CC_EFFORT = s.defaults.effort
       } catch {}
       if (shouldDisableAutoupdate()) {
         env.DISABLE_AUTOUPDATER = '1'

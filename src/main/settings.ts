@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
+  isSafeEffortValue,
   isSafeModelValue,
   normalizeLearnedModels,
   type LearnedModel
@@ -36,6 +37,9 @@ export interface Settings {
     autoLaunchCC: boolean
     // cc `--model` 实参；空串 = 不带 --model。仅新建会话（非 --resume）生效
     model: string
+    // cc `--effort` 实参（low/medium/high）；空串 = 不带 --effort，跟随 cc 自身配置。
+    // 与 model 不同，新建与 --resume 都带：effort 是会话级参数，不写回历史会话
+    effort: string
   }
   // true = statusline 探针把用户自己配的 statusLine 命令跑一遍并透传其输出，
   // 终端里的 cc 状态行与 app 外看到的一致；false = 探针只落盘不输出，状态行留空。
@@ -74,7 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cursor: { style: 'block', blink: true },
   terminal: { scrollback: 5000, theme: 'vscode-dark' },
   appTheme: 'light',
-  defaults: { cwd: '', autoLaunchCC: false, model: '' },
+  defaults: { cwd: '', autoLaunchCC: false, model: '', effort: '' },
   showStatusLine: false,
   dangerousSkipPermissions: false,
   claudePath: '',
@@ -153,7 +157,8 @@ function normalize(raw: unknown): Settings {
       cwd: typeof def.cwd === 'string' ? def.cwd : DEFAULT_SETTINGS.defaults.cwd,
       autoLaunchCC: typeof def.autoLaunchCC === 'boolean' ? def.autoLaunchCC : DEFAULT_SETTINGS.defaults.autoLaunchCC,
       // 允许 cc 完整模型 id（含 [1m] 等后缀），同时限定字符集防手改 settings.json 注入命令
-      model: isSafeModelValue(def.model) ? def.model : DEFAULT_SETTINGS.defaults.model
+      model: isSafeModelValue(def.model) ? def.model : DEFAULT_SETTINGS.defaults.model,
+      effort: isSafeEffortValue(def.effort) ? def.effort : DEFAULT_SETTINGS.defaults.effort
     },
     showStatusLine:
       typeof r.showStatusLine === 'boolean' ? r.showStatusLine : DEFAULT_SETTINGS.showStatusLine,

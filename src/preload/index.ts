@@ -125,7 +125,7 @@ export interface Settings {
   cursor: { style: CursorStyle; blink: boolean }
   terminal: { scrollback: number; theme: ThemePreset }
   appTheme: AppTheme
-  defaults: { cwd: string; autoLaunchCC: boolean; model: string }
+  defaults: { cwd: string; autoLaunchCC: boolean; model: string; effort: string }
   showStatusLine: boolean
   dangerousSkipPermissions: boolean
   claudePath: string

@@ -99,6 +99,17 @@ export function normalizeLearnedModels(raw: unknown): LearnedModel[] {
   return out.sort((a, b) => (a.learnedAt < b.learnedAt ? 1 : a.learnedAt > b.learnedAt ? -1 : 0)).slice(0, 40)
 }
 
+// cc `--effort <level>` 的候选。cli 实际还认 xhigh / max，这里只放常用三档，
+// 空串 = 不带 --effort，跟随 cc 自己的配置（env 或 modelSettings）。
+// 白名单即校验：实参会拼进 shell 命令，不走白名单就不注入。
+export const EFFORT_LEVELS = ['low', 'medium', 'high'] as const
+
+export type EffortLevel = (typeof EFFORT_LEVELS)[number]
+
+export function isSafeEffortValue(value: unknown): value is EffortLevel {
+  return typeof value === 'string' && (EFFORT_LEVELS as readonly string[]).includes(value)
+}
+
 export const LEARNED_FAMILY = '已发现'
 
 // 模型下拉的固定高度：内置候选之外还会追加「已发现」，不封顶会长到撑满整屏。

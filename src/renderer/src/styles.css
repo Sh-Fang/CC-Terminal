@@ -2109,6 +2109,14 @@ mark.hl {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
+/* 默认模型 + 思考强度 并排：模型名长，占满剩余宽度；effort 只有 low/medium/high，定宽够用 */
+.set-row-model {
+  display: grid;
+  grid-template-columns: 1fr 136px;
+  gap: 10px;
+}
+.set-row-model .model-cell,
+.set-row-model .effort-cell { min-width: 0; }
 /* 显示剩余额度 + 额度显示样式 竖排：上开关下样式；关掉开关时下面整块收起 */
 .set-row-usage {
   display: flex;

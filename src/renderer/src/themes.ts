@@ -18,7 +18,9 @@ export interface Settings {
   appTheme: AppTheme
   // model = cc `--model <arg>` 实参（alias 或完整 id）；空串 = 跟随 cc 默认。
   // 只在新建会话（非 --resume）时生效，避免覆盖旧会话原有模型。
-  defaults: { cwd: string; autoLaunchCC: boolean; model: string }
+  // effort = cc `--effort <low|medium|high>` 实参；空串 = 不带 --effort，跟随 cc 自身配置。
+  // 与 model 不同，新建与 --resume 都带：effort 只作用于本次会话，不写回历史会话
+  defaults: { cwd: string; autoLaunchCC: boolean; model: string; effort: string }
   // true = 探针把用户自己配的 statusLine 命令跑一遍并透传输出；false = 状态行留空
   showStatusLine: boolean
   // true = 每次启动 cc（新建与 --resume 都算）都带 --dangerously-skip-permissions
@@ -55,7 +57,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cursor: { style: 'block', blink: true },
   terminal: { scrollback: 5000, theme: 'vscode-dark' },
   appTheme: 'light',
-  defaults: { cwd: '', autoLaunchCC: false, model: '' },
+  defaults: { cwd: '', autoLaunchCC: false, model: '', effort: '' },
   showStatusLine: false,
   dangerousSkipPermissions: false,
   claudePath: '',

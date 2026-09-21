@@ -40,6 +40,7 @@ import type {
 } from './app-types'
 import {
   isKnownModel,
+  isSafeEffortValue,
   isSafeModelValue,
   prettyModelLabel,
   withContextSuffix,
@@ -481,10 +482,14 @@ async function launchCC(tab: TerminalTab): Promise<void> {
   const settingsArg = await hookSettingsArg()
   // 每次起 cc 都现读设置：改完开关再「重新加载标签」，新进程就按新模式起（不必重开 app）
   const dangerArg = settings.dangerousSkipPermissions ? ' --dangerously-skip-permissions' : ''
+  // effort 与 model 不同：它只影响本次会话、不写回历史，所以 --resume 分支也带上。
+  // 值取自白名单（isSafeEffortValue），不落 cc 的 settings.json
+  const effort = settings.defaults.effort
+  const effortArg = isSafeEffortValue(effort) ? ` --effort ${effort}` : ''
   const active = tab.activeSessionId
   let cmd: string
   if (active && UUID_RE.test(active) && (await window.term.claudeSessionExists(active))) {
-    cmd = `${invoker}${claudeCmd} --resume ${active}${dangerArg}${settingsArg}`
+    cmd = `${invoker}${claudeCmd} --resume ${active}${effortArg}${dangerArg}${settingsArg}`
   } else {
     // 幽灵会话清理：旧 UUID 对应的 jsonl 已不在，从栈里移除
     if (active && UUID_RE.test(active)) {
@@ -497,7 +502,7 @@ async function launchCC(tab: TerminalTab): Promise<void> {
     // 统一走 isSafeModelValue 校验后再 quoteShell，支持 [1m] 等完整 id，同时防注入。
     const model = settings.defaults.model
     const modelArg = isSafeModelValue(model) ? ` --model ${quoteShell(model)}` : ''
-    cmd = `${invoker}${claudeCmd} --session-id ${newId} --name ${quoteShell(tab.name)}${modelArg}${dangerArg}${settingsArg}`
+    cmd = `${invoker}${claudeCmd} --session-id ${newId} --name ${quoteShell(tab.name)}${modelArg}${effortArg}${dangerArg}${settingsArg}`
   }
   window.term.send(tab.ptyId, cmd + '\r')
 }

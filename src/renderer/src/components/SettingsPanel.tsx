@@ -26,7 +26,11 @@ import {
 import { icon } from "../svg-icons";
 import { t } from "../i18n";
 import { getLearnedModels, getSettings, updateSettings } from "../controller";
-import { MODEL_MENU_MAX_H, modelGroupsWithLearned } from "../../../shared/claude-models";
+import {
+  EFFORT_LEVELS,
+  MODEL_MENU_MAX_H,
+  modelGroupsWithLearned,
+} from "../../../shared/claude-models";
 import { useAppStore } from "../state/store";
 import { ClaudeAccountSection } from "./ClaudeAccountSection";
 import { escapeHtml } from "../lib/format";
@@ -40,6 +44,8 @@ interface InstalledCcVersion {
 }
 
 const FOLLOW_CC_LABEL = "跟随 Claude Code 默认";
+// effort 那格窄，长文案会被省略号截掉，用短的
+const FOLLOW_CC_SHORT = "跟随 CC";
 const CC_PAGE_SIZE = 10;
 
 // 简易 semver 比较：与主进程 cc-versions.ts 保持一致；pre-release 视为更小
@@ -129,6 +135,7 @@ interface Form {
   showUsage: boolean;
   showFloater: boolean;
   model: string;
+  effort: string;
   language: AppLanguage;
 }
 
@@ -156,6 +163,7 @@ function formFromSettings(s: Settings): Form {
     showUsage: s.showClaudeUsage,
     showFloater: s.showFloater,
     model: s.defaults.model || "",
+    effort: s.defaults.effort || "",
     language: s.language || "zh",
   };
 }
@@ -195,11 +203,13 @@ export function SettingsPanel() {
   formRef.current = form;
   const [section, setSection] = useState("appearance");
   const [modelOpen, setModelOpen] = useState(false);
+  const [effortOpen, setEffortOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
   const [langHintShown, setLangHintShown] = useState(false);
   const lastDisableUpdRef = useRef<boolean | null>(null);
   const scrimDownRef = useRef(false);
   const modelBtnRef = useRef<HTMLButtonElement>(null);
+  const effortBtnRef = useRef<HTMLButtonElement>(null);
   const langBtnRef = useRef<HTMLButtonElement>(null);
   // npm 镜像下拉：时延按 url 记账
   const [npmOpen, setNpmOpen] = useState(false);
@@ -436,6 +446,7 @@ export function SettingsPanel() {
         cwd: cur.defaults.cwd,
         autoLaunchCC: f.defaultCC,
         model: f.model ?? "",
+        effort: f.effort ?? "",
       },
       showStatusLine: f.showStatusLine,
       dangerousSkipPermissions: f.dangerMode,
@@ -783,6 +794,40 @@ export function SettingsPanel() {
     showCtxMenu(items, r.left, r.bottom + 4, () => setModelOpen(false), {
       minWidth: r.width,
       maxHeight: MODEL_MENU_MAX_H,
+    });
+  }
+
+  // effort picker：候选固定四项，不封高度（比模型列表短得多）
+  function openEffortPicker(): void {
+    if (effortOpen) {
+      closeCtxMenu();
+      return;
+    }
+    const cur = formRef.current.effort;
+    const setVal = (v: string): void => {
+      if (formRef.current.effort === v) return;
+      commit({ effort: v });
+    };
+    const items: CtxItem[] = [
+      {
+        label: t(FOLLOW_CC_SHORT),
+        icon: cur === "" ? "✓" : "",
+        act: () => setVal(""),
+      },
+      { sep: true },
+      // low/medium/high 是 cc 的参数字面量，不过 t()
+      ...EFFORT_LEVELS.map((lv) => ({
+        label: lv,
+        icon: lv === cur ? "✓" : "",
+        act: () => setVal(lv),
+      })),
+    ];
+    const btn = effortBtnRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    setEffortOpen(true);
+    showCtxMenu(items, r.left, r.bottom + 4, () => setEffortOpen(false), {
+      minWidth: r.width,
     });
   }
 
@@ -1593,33 +1638,64 @@ export function SettingsPanel() {
               hidden={section !== "claude"}
             >
               <ClaudeAccountSection active={open && section === "claude"} />
-              <div className="set-row">
-                <label>{t("默认模型")}</label>
-                <button
-                  type="button"
-                  className={"picker-select" + (modelOpen ? " open" : "")}
-                  id="set-default-model"
-                  data-val={form.model}
-                  ref={modelBtnRef}
-                  onClick={(e) => {
-                    e.stopPropagation(); // 挡掉 document.click 关 ctx 的兜底
-                    openModelPicker();
-                  }}
-                >
-                  <span
-                    className={
-                      "picker-label" + (form.model === "" ? " mute" : "")
-                    }
-                  >
-                    {modelLabel}
-                  </span>
-                  <span
-                    className="picker-chev"
-                    dangerouslySetInnerHTML={{
-                      __html: icon("chevron-down", { size: 14 }),
+              {/* 模型与 effort 是同一次启动要一起决定的两件事，并排一行 */}
+              <div className="set-row set-row-model">
+                <div className="model-cell">
+                  <label>{t("默认模型")}</label>
+                  <button
+                    type="button"
+                    className={"picker-select" + (modelOpen ? " open" : "")}
+                    id="set-default-model"
+                    data-val={form.model}
+                    ref={modelBtnRef}
+                    onClick={(e) => {
+                      e.stopPropagation(); // 挡掉 document.click 关 ctx 的兜底
+                      openModelPicker();
                     }}
-                  />
-                </button>
+                  >
+                    <span
+                      className={
+                        "picker-label" + (form.model === "" ? " mute" : "")
+                      }
+                    >
+                      {modelLabel}
+                    </span>
+                    <span
+                      className="picker-chev"
+                      dangerouslySetInnerHTML={{
+                        __html: icon("chevron-down", { size: 14 }),
+                      }}
+                    />
+                  </button>
+                </div>
+                <div className="effort-cell">
+                  <label>{t("思考强度")}</label>
+                  <button
+                    type="button"
+                    className={"picker-select" + (effortOpen ? " open" : "")}
+                    id="set-default-effort"
+                    data-val={form.effort}
+                    ref={effortBtnRef}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEffortPicker();
+                    }}
+                  >
+                    <span
+                      className={
+                        "picker-label" + (form.effort === "" ? " mute" : "")
+                      }
+                    >
+                      {form.effort === "" ? t(FOLLOW_CC_SHORT) : form.effort}
+                    </span>
+                    <span
+                      className="picker-chev"
+                      dangerouslySetInnerHTML={{
+                        __html: icon("chevron-down", { size: 14 }),
+                      }}
+                    />
+                  </button>
+                </div>
               </div>
               <div className="set-row set-row-toggle">
                 <label>{t("新建标签默认启动 Claude Code")}</label>

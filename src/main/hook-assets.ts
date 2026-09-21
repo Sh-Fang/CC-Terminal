@@ -347,6 +347,8 @@ function Global:cct {
     $settingsArg = @('--settings', $env:TERMINAL_HOOK_SETTINGS_JSON)
     # app 设置里开了「默认危险模式」→ pty:create 注入 TERMINAL_CC_DANGEROUS=1
     if ($env:TERMINAL_CC_DANGEROUS -eq '1') { $settingsArg += '--dangerously-skip-permissions' }
+    # app 设置里选了「思考强度」→ pty:create 注入 TERMINAL_CC_EFFORT（值已在主进程过白名单）
+    if ($env:TERMINAL_CC_EFFORT) { $settingsArg += @('--effort', $env:TERMINAL_CC_EFFORT) }
     if ($isResume) {
         & $claudeBin @settingsArg --resume @passArgs
     } else {
@@ -376,14 +378,17 @@ const CCT_SH = `cct() {
   # app 设置里开了「默认危险模式」→ pty:create 注入 TERMINAL_CC_DANGEROUS=1
   local danger=()
   [ "$TERMINAL_CC_DANGEROUS" = "1" ] && danger=(--dangerously-skip-permissions)
+  # app 设置里选了「思考强度」→ pty:create 注入 TERMINAL_CC_EFFORT（值已在主进程过白名单）
+  local effort=()
+  [ -n "$TERMINAL_CC_EFFORT" ] && effort=(--effort "$TERMINAL_CC_EFFORT")
   if [ "$is_resume" -eq 1 ]; then
-    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" --resume "\${pass[@]}"
+    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" "\${effort[@]}" --resume "\${pass[@]}"
   else
     local sid
     sid=$(uuidgen 2>/dev/null | tr 'A-Z' 'a-z')
     [ -z "$sid" ] && sid=$(node -e 'console.log(require("crypto").randomUUID())' 2>/dev/null)
     local name=\${TERMINAL_TAB_NAME:-cct}
-    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" --session-id "$sid" --name "$name" "\${pass[@]}"
+    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" "\${effort[@]}" --session-id "$sid" --name "$name" "\${pass[@]}"
   fi
 }
 `
