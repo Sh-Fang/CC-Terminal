@@ -86,8 +86,8 @@ jobs:
       - name: 补装 macOS x64 原生模块
         if: runner.os == 'macOS'
         run: |
-          PTY=$(node -p "require('@lydell/node-pty/package.json').version")
-          KOFFI=$(node -p "require('koffi/package.json').version")
+          PTY=$(node -p "require('./node_modules/@lydell/node-pty/package.json').version")
+          KOFFI=$(node -p "require('./node_modules/koffi/package.json').version")
           npm install --no-save --force "@lydell/node-pty-darwin-x64@$PTY" "@koromix/koffi-darwin-x64@$KOFFI"
 
       # --publish never：electron-builder 在 CI 上会隐式尝试自己发布（要 GH_TOKEN），
