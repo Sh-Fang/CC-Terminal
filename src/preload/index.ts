@@ -7,8 +7,10 @@ import type {
 } from '../shared/claude-accounts'
 import type { UpdateActionResult, UpdateCheckResult, UpdateEvent } from '../shared/update'
 import type { SessionSource, StoreOp, StoreSnapshot } from '../shared/store-types'
+import type { ForegroundInfo } from '../shared/foreground'
 
 export type {
+  ForegroundInfo,
   ClaudeAccountDetail,
   ClaudeAccountResult,
   ClaudeAccountsSnapshot,
@@ -176,6 +178,9 @@ export interface TermBridge {
   onWindowCloseRequest(cb: () => void): () => void
   onData(cb: (id: number, data: string) => void): () => void
   onExit(cb: (id: number, exitCode: number) => void): () => void
+  // 前台程序变化：按 ptyId 推送
+  onForeground(cb: (id: number, info: ForegroundInfo) => void): () => void
+  foregroundAll(): Promise<Record<number, ForegroundInfo>>
   onSessionEvent(cb: (e: SessionEvent) => void): () => void
   onStateEvent(cb: (e: StateEvent) => void): () => void
   // 悬浮窗
@@ -280,6 +285,13 @@ const api: TermBridge = {
     ipcRenderer.on('pty:exit', h)
     return () => ipcRenderer.off('pty:exit', h)
   },
+  onForeground: (cb) => {
+    const h = (_e: IpcRendererEvent, p: { id: number } & ForegroundInfo) =>
+      cb(p.id, { program: p.program, atPrompt: p.atPrompt })
+    ipcRenderer.on('pty:foreground', h)
+    return () => ipcRenderer.off('pty:foreground', h)
+  },
+  foregroundAll: () => ipcRenderer.invoke('pty:foreground'),
   onSessionEvent: (cb) => {
     const h = (_e: IpcRendererEvent, p: SessionEvent) => cb(p)
     ipcRenderer.on('session:event', h)

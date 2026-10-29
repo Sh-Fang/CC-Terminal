@@ -2,7 +2,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 
-const EXTERNAL = ['electron', '@lydell/node-pty']
+const EXTERNAL = ['electron', '@lydell/node-pty', 'koffi']
 
 // 仅 dev 生效：react-refresh 的内联脚本会被 script-src 'self' 拦下导致 HMR 报错，
 // dev server 阶段放宽 CSP；生产构建仍是严格 CSP。

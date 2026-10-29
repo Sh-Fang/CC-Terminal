@@ -14,6 +14,7 @@ import { t } from '../i18n'
 import type { GroupView } from '../controller'
 import type { TerminalTab } from '../terminal-tab'
 import type { TabStatus } from '../ui-helpers-types'
+import { FgIcon } from './FgIcon'
 import {
   getGroupViews,
   getActiveTabId,
@@ -250,7 +251,7 @@ export function Sidebar() {
           if (renamingTab !== tab.id) startRename(tab.id, tab.name)
         }}
       >
-        <span className={`st-dot st-${st}`} title={dotTitle}></span>
+        <FgIcon tab={tab} status={st} title={dotTitle} testId={`tab-fg-${tab.id}`} />
         {tab.memo != null && (
           // 便签图标：点开编辑弹窗，hover 圆角气泡预览备注开头；stopPropagation 挡住行激活/改名
           <span
@@ -336,7 +337,7 @@ export function Sidebar() {
         data-testid={`child-row-${c.id}`}
         onClick={() => activateTab(c.id)}
       >
-        <span className={`st-dot st-${st}`} title={dotTitle}></span>
+        <FgIcon tab={c} status={st} title={dotTitle} testId={`child-fg-${c.id}`} />
         <span className="trow-name" title={c.name}>
           {c.name}
         </span>

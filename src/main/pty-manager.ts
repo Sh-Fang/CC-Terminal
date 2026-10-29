@@ -116,6 +116,15 @@ export function createPty(
   return id
 }
 
+// 每个 PTY 的 shell 进程号，供前台程序识别查进程树
+export function shellPids(): Map<number, number> {
+  const out = new Map<number, number>()
+  for (const s of sessions.values()) {
+    out.set(s.id, s.proc.pid)
+  }
+  return out
+}
+
 export function writePty(id: number, data: string): void {
   sessions.get(id)?.proc.write(data)
 }

@@ -289,6 +289,13 @@ export function applyOp(o: StoreOp): StoreSnapshot {
       }
       break
     }
+    case 'setAutoLaunch': {
+      const t = tabOf(o.id)
+      if (t) {
+        t.autoLaunchCC = o.autoLaunchCC
+      }
+      break
+    }
     case 'setMemo': {
       const t = tabOf(o.id)
       if (t) {

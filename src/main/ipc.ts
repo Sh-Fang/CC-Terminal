@@ -2,7 +2,8 @@ import { app, BrowserWindow as BrowserWindowClass, dialog, ipcMain, shell, type 
 import { existsSync, statSync } from 'node:fs'
 import { request as httpsRequest } from 'node:https'
 import { request as httpRequest } from 'node:http'
-import { createPty, killPty, killPtyAndWait, resizePty, writePty } from './pty-manager'
+import { createPty, killPty, killPtyAndWait, resizePty, shellPids, writePty } from './pty-manager'
+import { currentForeground, pokeForeground, startForegroundWatch } from './foreground'
 import { applyOp, setStoreChangeListener, snapshot, type StoreOp } from './store'
 import { detectClaudePath, isClaudeAvailable, sessionExists } from './claude-helper'
 import {
@@ -301,12 +302,18 @@ export function registerPtyIpc(
           freshEnv: opts?.freshEnv === true,
           profiles: { pwsh: hp.pwshProfilePs1, zsh: hp.zshProfile, bash: hp.bashProfile }
         },
-        (sid, data) => sendToMain('pty:data', { id: sid, data }),
+        (sid, data) => {
+          sendToMain('pty:data', { id: sid, data })
+          pokeForeground()
+        },
         (sid, exitCode) => sendToMain('pty:exit', { id: sid, exitCode })
       )
       return id
     }
   )
+
+  startForegroundWatch(shellPids, (id, info) => sendToMain('pty:foreground', { id, ...info }))
+  ipcMain.handle('pty:foreground', () => currentForeground())
 
   ipcMain.handle('hooks:paths', () => getHookPaths())
 

@@ -66,12 +66,6 @@
 :root[data-app-theme='dark'] .st-done { color: #98c379; }
 :root[data-app-theme='dark'] .trow-badge.bs-busy { color: #61afef; }
 :root[data-app-theme='dark'] .trow-badge.bs-done { color: #98c379; }
-:root[data-app-theme='dark'] .start-cc-btn {
-  color: #61afef;
-  background: rgba(97, 175, 239, 0.12);
-  border-color: rgba(97, 175, 239, 0.3);
-}
-:root[data-app-theme='dark'] .start-cc-btn:hover { background: rgba(97, 175, 239, 0.2); border-color: #61afef; }
 :root[data-app-theme='dark'] .sp-busy { background: rgba(97, 175, 239, 0.14); color: #61afef; }
 :root[data-app-theme='dark'] .sp-done { background: rgba(152, 195, 121, 0.14); color: #98c379; }
 :root[data-app-theme='dark'] .set-hint.ok,
@@ -427,6 +421,16 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   100% { transform: scale(2.3); opacity: 0; }
 }
 .grp-st { margin-right: 2px; }
+/* 前台程序图标：替代标签页状态点，颜色同状态点；空闲用次要文字色，比状态点的浅灰更清楚 */
+.fg-ic {
+  width: 14px; height: 14px;
+  flex: 0 0 14px;
+  position: relative;
+  display: inline-grid; place-items: center;
+  line-height: 1;
+}
+.fg-ic.st-idle { color: var(--mute); }
+.fg-ic svg { display: block; }
 
 .trow-name {
   flex: 1; font-size: 13px; overflow: hidden;
@@ -595,7 +599,8 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   border-color: var(--hairline-strong);
   color: var(--ink);
 }
-.tabchip .st-dot { flex: 0 0 auto; }
+.tabchip .st-dot,
+.tabchip .fg-ic { flex: 0 0 auto; }
 .tabchip-name {
   flex: 1 1 auto; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -624,25 +629,6 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 }
 .tabstrip-add:hover { background: var(--hairline); color: var(--ink); }
 
-/* 顶栏"启动 CC"按钮：仅纯 pwsh 标签显示（toolbar.render 加 .show）。
-   借用 sp-busy 的 cc 蓝色系，暗示"在这里点一下就能开 Claude Code"。 */
-.start-cc-btn {
-  display: none;
-  align-items: center; gap: 5px;
-  flex: 0 0 auto;
-  font-size: 12px; padding: 3px 10px;
-  border-radius: var(--r-full);
-  border: 1px solid #cfe2ff;
-  background: #e8f1ff;
-  color: #0761d1;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.12s, border-color 0.12s;
-}
-.start-cc-btn.show { display: inline-flex; }
-.start-cc-btn:hover { background: #dbe9ff; border-color: #0761d1; }
-.start-cc-btn:active { background: #cfe2ff; }
-.start-cc-btn svg { flex: 0 0 auto; }
 
 .toolbar .spacer { flex: 0 0 8px; }
 
@@ -897,6 +883,9 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 .ctx-item.danger { color: var(--error); }
 .ctx-item.danger .ic { color: var(--error); }
 .ctx-sep { height: 1px; background: var(--hairline); margin: 4px 6px; }
+.ctx-item .ctx-sub-arrow { margin-left: auto; color: var(--mute); display: inline-grid; place-items: center; }
+.ctx-item.has-sub { cursor: default; }
+.ctx.ctx-sub { min-width: 160px; }
 /* 行尾右对齐的附加信息（npm 镜像下拉的时延徽标等） */
 .ctx-item .ctx-meta {
   margin-left: auto;

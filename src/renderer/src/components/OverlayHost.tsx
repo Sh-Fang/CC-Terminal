@@ -8,10 +8,12 @@ import {
   closeModal,
   closeMemoEditor,
   resolveConfirm,
+  type CtxItem,
   type MemoEditorOpts,
   type ModalOpts
 } from '../state/overlays'
 import { t } from '../i18n'
+import { icon } from '../svg-icons'
 
 // scrim 关闭手势：mousedown 与 click 都落在 scrim 自身才关闭，防止 modal 内选文字拖出被误判
 function useScrimDismiss(onDismiss: () => void): {
@@ -30,52 +32,32 @@ function useScrimDismiss(onDismiss: () => void): {
   }
 }
 
-function CtxMenu() {
-  const ctx = useOverlays((s) => s.ctx)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const onDocClick = (e: globalThis.MouseEvent): void => {
-      if (!(e.target as HTMLElement).closest('.ctx')) closeCtxMenu()
-    }
-    document.addEventListener('click', onDocClick)
-    return () => document.removeEventListener('click', onDocClick)
-  }, [])
-
-  // 先显示以测尺寸，再夹进屏幕防溢出
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el || !ctx) return
-    const pad = 8
-    const w = el.offsetWidth
-    const h = el.offsetHeight
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const lx = Math.min(Math.max(pad, ctx.x), vw - w - pad)
-    const ly = Math.min(Math.max(pad, ctx.y), vh - h - pad)
-    el.style.left = `${lx}px`
-    el.style.top = `${ly}px`
-  }, [ctx])
-
+// 一组菜单项：有 children 的项悬停时通过 onHoverSub 报告自身位置以展开二级菜单
+function CtxItems(props: {
+  items: CtxItem[]
+  testPrefix: string
+  onHoverSub: (it: CtxItem | null, el: HTMLElement | null) => void
+}) {
   return (
-    <div
-      className={'ctx' + (ctx ? ' open' : '') + (ctx?.maxHeight != null ? ' ctx-capped' : '')}
-      id="ctx"
-      ref={ref}
-      style={{
-        ...(ctx?.minWidth != null ? { minWidth: ctx.minWidth } : null),
-        // 固定高度的菜单仍受视口上限约束，避免在小窗口里被顶出屏幕
-        ...(ctx?.maxHeight != null ? { maxHeight: ctx.maxHeight } : null)
-      }}
-    >
-      {ctx?.items.map((it, i) => {
-        if (it.sep) return <div key={i} className="ctx-sep" />
-        if (it.eyebrow) return <div key={i} className="ctx-eyebrow">{it.eyebrow}</div>
+    <>
+      {props.items.map((it, i) => {
+        if (it.sep) return <div key={i} className="ctx-sep" data-testid={`${props.testPrefix}-sep-${i}`} />
+        if (it.eyebrow) {
+          return (
+            <div key={i} className="ctx-eyebrow" data-testid={`${props.testPrefix}-eyebrow-${i}`}>
+              {it.eyebrow}
+            </div>
+          )
+        }
+        const hasSub = !!it.children?.length
         return (
           <div
             key={i}
-            className={'ctx-item' + (it.danger ? ' danger' : '')}
+            className={'ctx-item' + (it.danger ? ' danger' : '') + (hasSub ? ' has-sub' : '')}
+            data-testid={`${props.testPrefix}-item-${i}`}
+            onMouseEnter={(e) => props.onHoverSub(hasSub ? it : null, hasSub ? e.currentTarget : null)}
             onClick={() => {
+              if (hasSub) return
               closeCtxMenu()
               it.act?.()
             }}
@@ -85,10 +67,81 @@ function CtxMenu() {
             {it.metaHtml != null && (
               <span className="ctx-meta" dangerouslySetInnerHTML={{ __html: it.metaHtml }} />
             )}
+            {hasSub && (
+              <span className="ctx-sub-arrow" dangerouslySetInnerHTML={{ __html: icon('chevron-right', { size: 12 }) }} />
+            )}
           </div>
         )
       })}
-    </div>
+    </>
+  )
+}
+
+// 把 fixed 定位的菜单夹进视口
+function clampInto(el: HTMLElement, x: number, y: number): void {
+  const pad = 8
+  const lx = Math.min(Math.max(pad, x), window.innerWidth - el.offsetWidth - pad)
+  const ly = Math.min(Math.max(pad, y), window.innerHeight - el.offsetHeight - pad)
+  el.style.left = `${lx}px`
+  el.style.top = `${ly}px`
+}
+
+function CtxMenu() {
+  const ctx = useOverlays((s) => s.ctx)
+  const ref = useRef<HTMLDivElement>(null)
+  const subRef = useRef<HTMLDivElement>(null)
+  // 当前展开的二级菜单及其父项位置；.ctx 自带 overflow 会裁掉子元素，所以二级菜单单独 fixed 定位
+  const [sub, setSub] = useState<{ items: CtxItem[]; rect: DOMRect } | null>(null)
+
+  useEffect(() => {
+    const onDocClick = (e: globalThis.MouseEvent): void => {
+      if (!(e.target as HTMLElement).closest('.ctx')) closeCtxMenu()
+    }
+    document.addEventListener('click', onDocClick)
+    return () => document.removeEventListener('click', onDocClick)
+  }, [])
+
+  useEffect(() => setSub(null), [ctx])
+
+  // 先显示以测尺寸，再夹进屏幕防溢出
+  useLayoutEffect(() => {
+    if (ref.current && ctx) clampInto(ref.current, ctx.x, ctx.y)
+  }, [ctx])
+
+  // 二级菜单放在父项右侧，右边放不下时翻到左侧
+  useLayoutEffect(() => {
+    const el = subRef.current
+    if (!el || !sub) return
+    const right = sub.rect.right + 2
+    const x = right + el.offsetWidth > window.innerWidth - 8 ? sub.rect.left - el.offsetWidth - 2 : right
+    clampInto(el, x, sub.rect.top - 5)
+  }, [sub])
+
+  const onHoverSub = (it: CtxItem | null, el: HTMLElement | null): void => {
+    setSub(it?.children && el ? { items: it.children, rect: el.getBoundingClientRect() } : null)
+  }
+
+  return (
+    <>
+      <div
+        className={'ctx' + (ctx ? ' open' : '') + (ctx?.maxHeight != null ? ' ctx-capped' : '')}
+        id="ctx"
+        data-testid="ctx-menu"
+        ref={ref}
+        style={{
+          ...(ctx?.minWidth != null ? { minWidth: ctx.minWidth } : null),
+          // 固定高度的菜单仍受视口上限约束，避免在小窗口里被顶出屏幕
+          ...(ctx?.maxHeight != null ? { maxHeight: ctx.maxHeight } : null)
+        }}
+      >
+        {ctx && <CtxItems items={ctx.items} testPrefix="ctx" onHoverSub={onHoverSub} />}
+      </div>
+      {ctx && sub && (
+        <div className="ctx open ctx-sub" data-testid="ctx-sub-menu" ref={subRef}>
+          <CtxItems items={sub.items} testPrefix="ctx-sub" onHoverSub={() => {}} />
+        </div>
+      )}
+    </>
   )
 }
 

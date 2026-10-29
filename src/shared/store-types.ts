@@ -65,6 +65,7 @@ export type StoreOp =
   | { op: 'reorderGroups'; ids: string[] }
   | { op: 'createTab'; id: string; groupId: string; name: string; autoLaunchCC: boolean; stack?: string[] }
   | { op: 'renameTab'; id: string; name: string }
+  | { op: 'setAutoLaunch'; id: string; autoLaunchCC: boolean }
   | { op: 'setMemo'; id: string; memo: string | null }
   | { op: 'reorderTabs'; groupId: string; ids: string[] }
   | { op: 'closeTabs'; ids: string[] }

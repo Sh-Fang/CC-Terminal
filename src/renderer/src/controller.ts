@@ -22,6 +22,7 @@ import { setLanguage, t } from './i18n'
 import { bump } from './state/store'
 import type { GroupView, HistoryEntry, QuickGroup, QuickItem } from './app-types'
 import type { StoreOp, StoreSnapshot, TabRec } from '../../shared/store-types'
+import type { ForegroundInfo, ForegroundProgram } from '../../shared/foreground'
 
 export type { GroupView, HistoryEntry, QuickGroup, QuickItem } from './app-types'
 
@@ -150,7 +151,9 @@ function uid(prefix: string): string {
 
 const IS_WIN_PLATFORM = window.term.platform === 'win32'
 
-function quoteShell(s: string): string {
+// shell = 'cmd' 时按 cmd 语法用双引号（cmd 不认单引号）
+function quoteShell(s: string, shell?: ForegroundProgram): string {
+  if (shell === 'cmd') return `"${s}"`
   return IS_WIN_PLATFORM
     ? `'${s.replace(/'/g, "''")}'`
     : `'${s.replace(/'/g, "'\\''")}'`
@@ -175,12 +178,19 @@ function commandLineIsCcInvocation(cmd: string | undefined, claudePath: string):
   return false
 }
 
-let cachedHookSettingsArg: string | null = null
-async function hookSettingsArg(): Promise<string> {
-  if (cachedHookSettingsArg) return cachedHookSettingsArg
-  const hp = await window.term.hookPaths()
-  cachedHookSettingsArg = ` --settings ${quoteShell(hp.ccHooksJson)}`
-  return cachedHookSettingsArg
+let cachedHookJson: string | null = null
+async function hookSettingsArg(shell?: ForegroundProgram): Promise<string> {
+  if (!cachedHookJson) cachedHookJson = (await window.term.hookPaths()).ccHooksJson
+  return ` --settings ${quoteShell(cachedHookJson, shell)}`
+}
+
+// 前台程序：按 ptyId 记主进程推来的结果；还没推到时按平台默认 shell、视为不在提示符
+const fgByPty = new Map<number, ForegroundInfo>()
+const DEFAULT_SHELL: ForegroundProgram = IS_WIN_PLATFORM ? 'pwsh' : 'sh'
+
+export function foregroundOf(tab: TerminalTab): ForegroundInfo {
+  const info = tab.ptyId != null ? fgByPty.get(tab.ptyId) : undefined
+  return info ?? { program: DEFAULT_SHELL, atPrompt: false }
 }
 
 function findTab(tabId: string): { group: Group; tab: TerminalTab } | null {
@@ -317,7 +327,8 @@ function ccGateRelease(tabId: string): void {
 // 这些 tabId 的下一次 onPtyStarted 破例走一次 launchCC，用完即消费。
 const resumeCcOnNextStart = new Set<string>()
 
-async function launchCC(tab: TerminalTab): Promise<void> {
+// shell：要把命令发进哪种 shell，决定引号与调用语法；不传则是标签页自己起的 shell
+async function launchCC(tab: TerminalTab, shell?: ForegroundProgram): Promise<void> {
   const forced = resumeCcOnNextStart.delete(tab.id)
   if (!tab.autoLaunchCC && !forced) return
   if (tab.ptyId == null) return
@@ -344,11 +355,11 @@ async function launchCC(tab: TerminalTab): Promise<void> {
       return
     }
   }
-  const claudeCmd = claudeBin ? quoteShell(claudeBin) : 'claude'
-  // pwsh 里引号包住的绝对路径要加 & 调用操作符才执行；POSIX 不用
-  const invoker = claudeBin && IS_WIN_PLATFORM ? '& ' : ''
+  const claudeCmd = claudeBin ? quoteShell(claudeBin, shell) : 'claude'
+  // pwsh 里引号包住的绝对路径要加 & 调用操作符才执行；cmd 和 POSIX 不用
+  const invoker = claudeBin && IS_WIN_PLATFORM && shell !== 'cmd' ? '& ' : ''
 
-  const settingsArg = await hookSettingsArg()
+  const settingsArg = await hookSettingsArg(shell)
   // 每次起 cc 都现读设置：改完开关再「重新加载标签」，新进程就按新模式起（不必重开 app）
   const dangerArg = settings.dangerousSkipPermissions ? ' --dangerously-skip-permissions' : ''
   // 主会话（栈顶）还在就续上；对话记录已不在则从栈里移除，新开会话（hook 上报后成为栈顶）
@@ -370,14 +381,18 @@ async function launchCC(tab: TerminalTab): Promise<void> {
   window.term.send(tab.ptyId, cmd + '\r')
 }
 
-// 顶栏"启动 CC"按钮：在纯 pwsh 标签里手动起可被接管的 cc（等效手敲 cct），hook 上报后压栈接管。
-export function startCcInActiveTab(): void {
-  const ctx = activeContext()
-  if (!ctx) return
+// 右键「启动智能体 → Claude Code」：标签页转为 Claude 标签页，在当前 shell 里起 cc（有主会话就续上）
+export async function launchAgentInTab(tabId: string): Promise<void> {
+  const ctx = findTab(tabId)
+  if (!ctx || ctx.tab.ptyId == null) return
   const { tab } = ctx
-  if (isCcTab(tab)) return       // 已勾自动启动或已起过会话 → 不重复起
-  if (tab.ptyId == null) return  // pty 还没就绪
-  window.term.send(tab.ptyId, 'cct\r')
+  const fg = foregroundOf(tab)
+  if (!fg.atPrompt) return
+  if (!tab.autoLaunchCC) {
+    tab.autoLaunchCC = true
+    await op({ op: 'setAutoLaunch', id: tabId, autoLaunchCC: true })
+  }
+  await launchCC(tab, fg.program)
   tab.term.focus()
 }
 
@@ -1082,6 +1097,17 @@ export function openTabCtx(tabId: string, x: number, y: number): void {
   if (items.length > 0) {
     items.push({ sep: true })
   }
+  // 前台程序是 shell 本身（底下没有子程序）才能启动智能体
+  if (!isChildId(tabId) && foregroundOf(ctx.tab).atPrompt) {
+    items.push(
+      {
+        label: t('启动智能体'),
+        icon: icon('bot'),
+        children: [{ label: 'Claude Code', icon: icon('claude'), act: () => void launchAgentInTab(tabId) }]
+      },
+      { sep: true }
+    )
+  }
   showCtxMenu(
     [
       ...items,
@@ -1380,8 +1406,15 @@ export async function initApp(): Promise<void> {
     for (const t of allTabs()) if (t.ptyId === id) return t.writeFromPty(data)
   })
   const offExit = window.term.onExit((id, exitCode) => {
+    fgByPty.delete(id)
     for (const t of allTabs()) if (t.ptyId === id) return t.handlePtyExit(exitCode)
   })
+  const offForeground = window.term.onForeground((id, info) => {
+    fgByPty.set(id, info)
+    refreshUI()
+  })
+  // 渲染层重新加载后，主进程只推变化，先拉一次全量
+  for (const [id, info] of Object.entries(await window.term.foregroundAll())) fgByPty.set(Number(id), info)
 
   // ─── store 快照（会话栈由主进程按会话事件维护后推过来） ───────────
   const offStore = window.term.onStoreChanged((snap) => applySnapshot(snap))
@@ -1471,6 +1504,7 @@ export async function initApp(): Promise<void> {
   window.addEventListener('beforeunload', () => {
     offData()
     offExit()
+    offForeground()
     offStore()
     offSession()
     offState()

@@ -13,7 +13,6 @@ import {
   openTabCtx,
   openTabMemoEditor,
   openSessionCtx,
-  startCcInActiveTab,
   switchSession,
   moveTabWithinGroup,
   setTabDragData,
@@ -24,6 +23,7 @@ import { formatTs, midEllipsis, statusLabel } from '../lib/format'
 import { icon } from '../svg-icons'
 import { t } from '../i18n'
 import type { TerminalTab, SessionRecord, TabStatus } from '../terminal-tab'
+import { FgIcon } from './FgIcon'
 
 // 当前会话：优先按 activeSessionId 找，找不到退回栈顶
 function currentSession(tab: TerminalTab): SessionRecord | undefined {
@@ -118,8 +118,6 @@ export function Toolbar() {
   const tab = cur?.tab
   const st = (tab?.status ?? 'idle') as TabStatus
   const curSess = tab ? currentSession(tab) : undefined
-  // "启动 CC"显示条件：没勾自动启动且 cc 进程不活跃（用 ccActive：cc 退出后按钮要回来）
-  const pureNonCc = tab != null && !tab.autoLaunchCC && !tab.ccActive
   // 水平标签栏时整条 .toolbar 被 CSS 隐藏，会话菜单要挂到 .tabstrip 下才弹得出来
   const horizontal = getSettings().tabBarMode === 'horizontal'
 
@@ -262,7 +260,7 @@ export function Toolbar() {
                         dangerouslySetInnerHTML={{ __html: icon('sticky-note', { size: 11 }) }}
                       />
                     )}
-                    <span className={`st-dot st-${cst}`} title={dotTitle}></span>
+                    <FgIcon tab={tb} status={cst} title={dotTitle} testId={`tabchip-fg-${tb.id}`} />
                     <span className="tabchip-name">{tb.name}</span>
                     <span
                       className="tabchip-close"
@@ -345,18 +343,6 @@ export function Toolbar() {
               </span>
             )}
           </span>
-          <button
-            className={'start-cc-btn' + (pureNonCc ? ' show' : '')}
-            id="startCcBtn"
-            type="button"
-            title={t('在当前标签启动 Claude Code')}
-            onClick={() => startCcInActiveTab()}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-            <span>{t('启动 CC')}</span>
-          </button>
         </div>
         <div className="spacer"></div>
         <div

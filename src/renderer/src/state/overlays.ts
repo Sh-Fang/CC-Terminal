@@ -11,6 +11,7 @@ export interface CtxItem {
   eyebrow?: string // 分组小标题，不可点击
   act?: () => void
   metaHtml?: string // 行尾右对齐的附加信息（HTML，如时延徽标）
+  children?: CtxItem[] // 二级菜单：悬停展开，本项不可点击
 }
 
 export type ModalKind = 'new-group' | 'new-tab' | 'rename'

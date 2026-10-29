@@ -48,8 +48,6 @@ export const I18N_EN: Record<string, string> = {
   // 顶栏 / 工具栏
   '在当前分组新建标签': 'New tab in current group',
   '新建标签': 'New Tab',
-  '启动 CC': 'Start CC',
-  '在当前标签启动 Claude Code': 'Start Claude Code in the current tab',
   '切换会话': 'Switch session',
   '分组 / 工作区管理': 'Group / workspace manager',
   '设置': 'Settings',
@@ -526,6 +524,7 @@ export const I18N_EN: Record<string, string> = {
   '本周额度': 'Weekly limit',
   '{0}额度': '{0} limit',
   '工作区': 'Workspace',
+  '启动智能体': 'Launch agent',
   '暂无会话': 'No sessions',
   '重新加载会中断正在进行的回合。': 'Reloading will interrupt the turn in progress.',
   '重新加载会中断正在运行的命令。': 'Reloading will interrupt the running command.',

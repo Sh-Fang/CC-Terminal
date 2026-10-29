@@ -10,6 +10,22 @@ _Avoid_: 路径 id、工作区
 一个终端实例，在所属分组的工作目录里运行 shell 或 Claude Code；名下有一个会话栈。
 _Avoid_: tab、终端窗口
 
+**Claude 标签页**:
+重新打开时会自动续上 Claude Code 主会话的标签页。
+_Avoid_: CC 标签、cc tab
+
+**终端标签页**:
+不是 Claude 标签页的标签页，重新打开时只起 shell。
+_Avoid_: 纯 shell 标签、非 cc 标签
+
+**前台程序**:
+标签页里 shell 下面此刻在跑的那个程序；没有子程序时就是 shell 本身。
+_Avoid_: 当前进程、运行类型
+
+**智能体**:
+Claude Code、Codex 这类在终端里运行的 AI 会话程序。
+_Avoid_: agent、AI 工具
+
 **会话**:
 Claude Code 的一次对话，有自己的会话 ID 和对话记录。同一标签页名下的会话彼此平级。
 _Avoid_: session、对话、子会话

@@ -16,9 +16,11 @@ publish:
   owner: Sh-Fang
   repo: ClaudeTerminal
 
-# @lydell/node-pty 解到 app.asar.unpacked，require 才能加载 .node / OpenConsole.exe / conpty.dll
+# @lydell/node-pty、koffi 解到 app.asar.unpacked，require 才能加载 .node / OpenConsole.exe / conpty.dll
 asarUnpack:
   - '**/node_modules/@lydell/**'
+  - '**/node_modules/koffi/**'
+  - '**/node_modules/@koromix/**'
 
 files:
   - out/**/*
