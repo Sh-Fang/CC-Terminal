@@ -1,3 +1,4 @@
+import { isIsolated } from './dev-isolate'
 import { app, BrowserWindow, dialog, ipcMain, Menu, powerMonitor, shell, Tray } from 'electron'
 import { join } from 'node:path'
 import { registerPtyIpc } from './ipc'
@@ -56,7 +57,7 @@ function showMainWindow(): void {
 
 // 幂等创建常驻托盘
 function ensureTray(): void {
-  if (tray) return
+  if (tray || isIsolated) return
   const iconFile = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
   tray = new Tray(join(__dirname, '../../resources', iconFile))
   tray.setToolTip('Claude Terminal')
@@ -237,7 +238,15 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('ready-to-show', () => {
+    // 隔离实例放到屏幕外且不抢焦点
+    if (isIsolated) {
+      mainWindow?.setPosition(-20000, -20000)
+      mainWindow?.showInactive()
+      return
+    }
+    mainWindow?.show()
+  })
 
   // 主窗口销毁 = 整个 app 退出，把悬浮窗/副窗口一并带走
   mainWindow.on('closed', () => { destroyFloater(); destroyTray(); destroyAllSecondary() })

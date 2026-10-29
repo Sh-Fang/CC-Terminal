@@ -15,6 +15,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
+    "dev:isolated": "node scripts/dev-isolated.js",
     "smoke:pty": "node scripts/smoke-pty.js",
     "smoke:electron": "electron scripts/electron-smoke.js",
     "icon": "pwsh -NoProfile -File scripts/generate-icon.ps1",
