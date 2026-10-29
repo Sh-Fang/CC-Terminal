@@ -1,5 +1,5 @@
 # 自动发布：推送到 main 后，若 package.json 的版本号还没有对应的 v<version> tag，
-# 就在 Windows 跑器上打包（NSIS 安装包 + 便携 zip），并创建同名 GitHub Release。
+# 就在 Windows / macOS / Linux 三个跑器上并行打包，全部成功后创建同名 GitHub Release。
 # 一次推多个提交只会以最终版本号发一次。也可在 Actions 页面手动触发。
 name: Release
 
@@ -39,11 +39,24 @@ jobs:
             echo "should_release=true" >> "$GITHUB_OUTPUT"
           fi
 
-  build-windows:
-    name: 打包 Windows 并发布
+  build:
+    name: 打包 ${{ matrix.name }}
     needs: check
     if: needs.check.outputs.should_release == 'true'
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            target: --win
+          - name: macOS
+            os: macos-latest
+            target: --mac
+          - name: Linux
+            os: ubuntu-latest
+            target: --linux
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -59,16 +72,56 @@ jobs:
           path: |
             ~/AppData/Local/electron/Cache
             ~/AppData/Local/electron-builder/Cache
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/.cache/electron
+            ~/.cache/electron-builder
           key: electron-cache-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
           restore-keys: electron-cache-${{ runner.os }}-
 
       - name: 安装依赖
         run: npm ci
 
+      # macOS 跑器是 Apple 芯片，npm 只装 arm64 的原生模块；Intel 包也要带上 x64 的那份
+      - name: 补装 macOS x64 原生模块
+        if: runner.os == 'macOS'
+        run: |
+          PTY=$(node -p "require('@lydell/node-pty/package.json').version")
+          KOFFI=$(node -p "require('koffi/package.json').version")
+          npm install --no-save --force "@lydell/node-pty-darwin-x64@$PTY" "@koromix/koffi-darwin-x64@$KOFFI"
+
       # --publish never：electron-builder 在 CI 上会隐式尝试自己发布（要 GH_TOKEN），
-      # 发布统一交给下面的 release action，这里只打包
+      # 发布统一交给 release 任务，这里只打包
       - name: 构建并打包
-        run: npm run dist -- --publish never
+        run: |
+          npm run build
+          npx electron-builder ${{ matrix.target }} --publish never
+
+      # latest*.yml + blockmap 是 electron-updater 应用内更新的元数据，必须一并上传
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            release/*.exe
+            release/*.zip
+            release/*.dmg
+            release/*.AppImage
+            release/*.tar.gz
+            release/*.blockmap
+            release/latest*.yml
+
+  release:
+    name: 创建 Release
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载各平台产物
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: 创建 Release 并上传产物
         uses: softprops/action-gh-release@v2
@@ -76,9 +129,4 @@ jobs:
           tag_name: v${{ needs.check.outputs.version }}
           name: v${{ needs.check.outputs.version }}
           generate_release_notes: true
-          # latest.yml + blockmap 是 electron-updater 应用内更新的元数据，必须一并上传
-          files: |
-            release/*.exe
-            release/*.zip
-            release/*.blockmap
-            release/latest.yml
+          files: dist/*
