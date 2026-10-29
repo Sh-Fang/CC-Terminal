@@ -243,8 +243,8 @@ export const I18N_EN: Record<string, string> = {
   '语言切换将在重启应用后生效': 'Language change takes effect after restart',
 
   // 主进程（托盘 / 原生对话框）
-  '打开 Claude Terminal': 'Open Claude Terminal',
-  '退出（终止所有会话）': 'Quit (terminate all sessions)',
+  '打开主界面': 'Open main window',
+  '退出': 'Quit',
   '确认关闭': 'Confirm Close',
   '确认关闭 Claude Terminal？': 'Close Claude Terminal?',
   '关闭后所有终端会话将被终止。': 'All terminal sessions will be terminated.',

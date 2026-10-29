@@ -53,10 +53,10 @@ function ensureTray(): void {
   tray = new Tray(join(__dirname, '../../resources', iconFile))
   tray.setToolTip('Claude Terminal')
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: t('打开 Claude Terminal'), click: () => showMainWindow() },
+    { label: t('打开主界面'), click: () => showMainWindow() },
     { type: 'separator' },
     {
-      label: t('退出（终止所有会话）'),
+      label: t('退出'),
       click: () => {
         allowClose = true
         fastQuit('tray-quit')
