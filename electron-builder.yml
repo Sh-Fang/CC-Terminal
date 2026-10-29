@@ -1,5 +1,5 @@
-appId: com.silver.claude-terminal
-productName: Claude Terminal
+appId: com.silver.cc-terminal
+productName: CC Terminal
 copyright: Copyright © 2026
 
 directories:
@@ -14,7 +14,7 @@ npmRebuild: false
 publish:
   provider: github
   owner: Sh-Fang
-  repo: ClaudeTerminal
+  repo: CC-Terminal
 
 # @lydell/node-pty、koffi 解到 app.asar.unpacked，require 才能加载 .node / OpenConsole.exe / conpty.dll
 asarUnpack:
@@ -25,6 +25,9 @@ asarUnpack:
 files:
   - out/**/*
   - resources/**/*
+  # 只供打包器生成各平台图标，不进应用包
+  - '!resources/icon-1024.png'
+  - '!resources/icon-mac.png'
   - package.json
   - '!**/*.map'
   - '!**/test/**'
@@ -34,28 +37,38 @@ win:
   icon: resources/icon.ico
   # 不用 ${productName}：带空格的文件名上传 GitHub 会被改名（空格→点），
   # 与 latest.yml 里净化后的 URL（空格→横杠）对不上，electron-updater 下载 404
-  artifactName: Claude-Terminal-${version}-${arch}.${ext}
+  artifactName: CC-Terminal-${version}-${arch}.${ext}
   target:
     - target: nsis
       arch: x64
     - target: zip
       arch: x64
 
-# macOS：不签名；icon.icns 先用 scripts/generate-icns.sh 生成；mac target 只能在 macOS 上构建
+# macOS：不签名；打包器从 icon-mac.png 生成 icns；mac target 只能在 macOS 上构建
 mac:
   category: public.app-category.developer-tools
-  icon: resources/icon.icns
-  artifactName: Claude-Terminal-${version}-${arch}.${ext}
+  icon: resources/icon-mac.png
+  artifactName: CC-Terminal-${version}-${arch}.${ext}
   identity: null            # 不签名/公证，首次打开需右键→打开绕过 Gatekeeper
   hardenedRuntime: false
   target:
     - target: dmg
-      arch: universal
+      arch: [arm64, x64]
     - target: zip
-      arch: universal
+      arch: [arm64, x64]
 
 dmg:
-  artifactName: Claude-Terminal-${version}-${arch}.${ext}
+  artifactName: CC-Terminal-${version}-${arch}.${ext}
+
+linux:
+  icon: resources/icon-1024.png
+  category: Development
+  artifactName: CC-Terminal-${version}-${arch}.${ext}
+  target:
+    - target: AppImage
+      arch: x64
+    - target: tar.gz
+      arch: x64
 
 nsis:
   oneClick: false
@@ -64,7 +77,7 @@ nsis:
   allowElevation: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Claude Terminal
+  shortcutName: CC Terminal
   installerIcon: resources/icon.ico
   uninstallerIcon: resources/icon.ico
   deleteAppDataOnUninstall: false

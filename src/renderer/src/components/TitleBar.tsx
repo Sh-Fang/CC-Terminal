@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { t } from '../i18n'
+import { BrandLogo } from './BrandLogo'
 
 // 标题栏：brand + 自绘窗口控制三键；macOS 用系统红绿灯，CSS 据 body.platform-mac 隐藏自绘按钮。
 export function TitleBar() {
@@ -25,20 +26,9 @@ export function TitleBar() {
     >
       <div className="brand">
         <span className="brand-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="16" height="16" xmlns="http://www.w3.org/2000/svg">
-            <rect x="1" y="2" width="22" height="20" rx="5.5" fill="currentColor" />
-            <polyline
-              points="6.5 9 10 12 6.5 15"
-              fill="none"
-              stroke="white"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <line x1="12.5" y1="15" x2="17.5" y2="15" stroke="white" strokeWidth="2.4" strokeLinecap="round" />
-          </svg>
+          <BrandLogo size={16} />
         </span>
-        Claude Terminal
+        CC Terminal
       </div>
       <div className="titlebar-spacer"></div>
       <div className="win-ctrls" aria-label={t('窗口控制')}>

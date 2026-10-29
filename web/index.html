@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Claude Terminal — 为 Claude Code 而生的 Windows 终端</title>
+<title>CC Terminal — 为 Claude Code 而生的 Windows 终端</title>
 <meta name="description" content="定制化终端（Electron + PowerShell 7），每个标签页绑定一个 Claude Code 会话，关闭后一键恢复原样。" />
 
 <!-- ╔══════════════════════════════════════════════════════════════╗
@@ -299,7 +299,7 @@
   <div class="wrap"><nav>
     <a class="brand" href="#top">
       <img src="data:image/png;base64,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" alt="" />
-      Claude Terminal
+      CC Terminal
     </a>
     <div class="nav-right">
       <a class="nav-link" href="#features">功能</a>
@@ -334,7 +334,7 @@
     <div class="term">
       <div class="term-bar">
         <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
-        <span class="term-title">Claude Terminal — 理科工单</span>
+        <span class="term-title">CC Terminal — 理科工单</span>
       </div>
       <div class="term-body">
         <aside class="side">
@@ -431,7 +431,7 @@
             <div class="shell">
               <div class="sh-bar">
                 <i class="sh-cls"></i><i class="sh-min"></i><i class="sh-max"></i>
-                <span class="sh-nm">Claude Terminal</span>
+                <span class="sh-nm">CC Terminal</span>
                 <div class="sh-floater"><span class="m" style="background:#eab308"></span><span class="m" style="background:#3b82f6"></span><span class="m" style="background:#22c55e"></span></div>
               </div>
               <div class="sh-body">
@@ -473,7 +473,7 @@
             <div class="shell">
               <div class="sh-bar">
                 <i class="sh-cls"></i><i class="sh-min"></i><i class="sh-max"></i>
-                <span class="sh-nm">Claude Terminal</span>
+                <span class="sh-nm">CC Terminal</span>
               </div>
               <div class="sh-body">
                 <div class="sh-side">
@@ -515,7 +515,7 @@
             <div class="shell">
               <div class="sh-bar">
                 <i class="sh-cls"></i><i class="sh-min"></i><i class="sh-max"></i>
-                <span class="sh-nm">Claude Terminal · 设置</span>
+                <span class="sh-nm">CC Terminal · 设置</span>
               </div>
               <div class="sh-body">
                 <div class="sh-side">
@@ -575,7 +575,7 @@
     <div class="wrap">
       <div class="sec-head">
         <div class="eyebrow">// download</div>
-        <h2>开始使用 Claude Terminal</h2>
+        <h2>开始使用 CC Terminal</h2>
         <p>选择适合你的版本。<span id="ver-inline"></span></p>
       </div>
       <div class="dl-grid">
@@ -612,7 +612,7 @@
 
 <footer>
   <div class="wrap foot">
-    <span class="brand" style="font-size:14px;font-weight:600;letter-spacing:-.02em">Claude Terminal</span>
+    <span class="brand" style="font-size:14px;font-weight:600;letter-spacing:-.02em">CC Terminal</span>
     <span>定制化终端 · Electron + PowerShell 7 · 适配 Windows</span>
     <span id="foot-ver"></span>
   </div>

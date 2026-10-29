@@ -1,5 +1,6 @@
 import { isIsolated } from './dev-isolate'
-import { app, BrowserWindow, dialog, ipcMain, Menu, powerMonitor, shell, Tray } from 'electron'
+import './legacy-userdata'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, powerMonitor, shell, Tray } from 'electron'
 import { join } from 'node:path'
 import { registerPtyIpc } from './ipc'
 import { killAll } from './pty-manager'
@@ -49,9 +50,11 @@ function showMainWindow(): void {
 // 幂等创建常驻托盘
 function ensureTray(): void {
   if (tray || isIsolated) return
-  const iconFile = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
-  tray = new Tray(join(__dirname, '../../resources', iconFile))
-  tray.setToolTip('Claude Terminal')
+  // 非 Windows 托盘不会自动缩放，512 的 png 要缩到菜单栏尺寸
+  tray = process.platform === 'win32'
+    ? new Tray(join(__dirname, '../../resources', 'icon.ico'))
+    : new Tray(nativeImage.createFromPath(join(__dirname, '../../resources', 'icon.png')).resize({ width: 18, height: 18 }))
+  tray.setToolTip('CC Terminal')
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: t('打开主界面'), click: () => showMainWindow() },
     { type: 'separator' },
@@ -220,7 +223,7 @@ function createWindow(): void {
       defaultId: 1,
       cancelId: 1,
       title: t('确认关闭'),
-      message: t('确认关闭 Claude Terminal？'),
+      message: t('确认关闭 CC Terminal？'),
       detail: t('关闭后所有终端会话将被终止。')
     })
     if (choice === 0) {

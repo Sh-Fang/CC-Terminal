@@ -44,7 +44,7 @@ function detectNodePath(): string {
 // SessionStart hook（node）。必须用 node 而非 pwsh：PS 冷启动慢 + 并发 IO 异常会导致
 // 非零退出、jsonl 丢行。出错路径全部 swallow + 始终 exit 0，hook 失败不影响 cc 主流程。
 // dirExpr：事件目录取值表达式；agent：写进事件行的智能体，cc 不写（默认 claude）
-const sessionProbeSource = (dirExpr: string, agent?: string): string => `// Claude Terminal · SessionStart hook
+const sessionProbeSource = (dirExpr: string, agent?: string): string => `// CC Terminal · SessionStart hook
 const fs = require('fs'); const path = require('path');
 const dir = ${dirExpr};
 const tab = process.env.TERMINAL_TAB_ID || '';
@@ -74,7 +74,7 @@ process.stdin.on('end', () => {
 
 // 状态 hook（node）：先写 .tmp 再 rename 避免 watcher 读到半截 JSON。
 // cc 版 dir 走 argv[2]、state 走 argv[3]；Codex 版 dir 取 env、state 走 argv[2]
-const stateProbeSource = (dirExpr: string, stateExpr: string): string => `// Claude Terminal · 状态 hook
+const stateProbeSource = (dirExpr: string, stateExpr: string): string => `// CC Terminal · 状态 hook
 const fs = require('fs'); const path = require('path');
 const dir = ${dirExpr};
 const state = ${stateExpr} || 'idle';
@@ -108,7 +108,7 @@ process.stdin.on('end', () => {
 
 // pwsh shell-integration：仿 VS Code 输出 OSC 133;A/B/C/D 与 633;E，渲染层据此做非 cc 命令的
 // 运行态检测（cc 状态仍由 hooks 主导）。[Console]::Write 直写绕开 pwsh buffering；不改用户 profile。
-const PWSH_PROFILE_PS1 = `# Claude Terminal · pwsh shell integration
+const PWSH_PROFILE_PS1 = `# CC Terminal · pwsh shell integration
 if ($env:__TERMINAL_SHELL_INTEG -ne '1') {
     $env:__TERMINAL_SHELL_INTEG = '1'
     $Global:__TerminalInFlight = $false
@@ -160,7 +160,7 @@ if ($env:__TERMINAL_SHELL_INTEG -ne '1') {
 # - 其余参数原样透传给 claude（可 cct --model xxx 等）
 function Global:cct {
     if (-not $env:TERMINAL_TAB_ID) {
-        Write-Host "cct: 需要在 Claude Terminal 的 tab 里运行" -ForegroundColor Yellow
+        Write-Host "cct: 需要在 CC Terminal 的 tab 里运行" -ForegroundColor Yellow
         return
     }
     if (-not $env:TERMINAL_HOOK_SETTINGS_JSON -or -not (Test-Path $env:TERMINAL_HOOK_SETTINGS_JSON)) {
@@ -189,7 +189,7 @@ function Global:cct {
 // cct（POSIX 版，zsh/bash 通用）：手动启动可被 app 接管的 cc 会话，语义与 pwsh 版一致。
 const CCT_SH = `cct() {
   if [ -z "$TERMINAL_TAB_ID" ]; then
-    printf '%s\\n' "cct: 需要在 Claude Terminal 的 tab 里运行"; return 1
+    printf '%s\\n' "cct: 需要在 CC Terminal 的 tab 里运行"; return 1
   fi
   if [ -z "$TERMINAL_HOOK_SETTINGS_JSON" ] || [ ! -f "$TERMINAL_HOOK_SETTINGS_JSON" ]; then
     printf '%s\\n' "cct: 缺少 cc-hooks.json (TERMINAL_HOOK_SETTINGS_JSON)"; return 1
@@ -217,7 +217,7 @@ const CCT_SH = `cct() {
 `
 
 // zsh shell-integration：preexec/precmd hook 发同一套 OSC 序列；__TERMINAL_SHELL_INTEG 防重复注入。
-const ZSH_PROFILE = `# Claude Terminal · zsh shell integration
+const ZSH_PROFILE = `# CC Terminal · zsh shell integration
 if [ -z "$__TERMINAL_SHELL_INTEG" ]; then
   export __TERMINAL_SHELL_INTEG=1
   typeset -g __terminal_in_flight=0
@@ -249,7 +249,7 @@ fi
 ${CCT_SH}`
 
 // bash shell-integration：无内建 preexec/precmd，用 DEBUG trap + PROMPT_COMMAND 近似（best-effort）。
-const BASH_PROFILE = `# Claude Terminal · bash shell integration (best-effort)
+const BASH_PROFILE = `# CC Terminal · bash shell integration (best-effort)
 if [ -z "$__TERMINAL_SHELL_INTEG" ] && [[ "$-" == *i* ]]; then
   export __TERMINAL_SHELL_INTEG=1
   __terminal_in_flight=0
@@ -350,7 +350,7 @@ export function ensureHookAssets(): HookPaths {
   return { ccHooksJson, sessionProbeJs, stateProbeJs, eventsDir, stateDir, pwshProfilePs1, zshProfile, bashProfile }
 }
 
-// Codex 的 hooks 写成一份独立 profile（$CODEX_HOME/claude-terminal.config.toml），只在 codex -p 时叠加，
+// Codex 的 hooks 写成一份独立 profile（$CODEX_HOME/cc-terminal.config.toml），只在 codex -p 时叠加，
 // 不碰用户自己的 config.toml / hooks.json。探针放在 Codex 目录下、事件目录走 env，
 // 这样正式实例和隔离实例写出的文件一致，hook 事件各自落回启动它的实例。
 // Windows 上 Codex 用 PowerShell 跑 hook，命令要 & 调用；其余平台走 sh。
@@ -359,7 +359,7 @@ function writeCodexProfile(nodePath: string): void {
   if (!existsSync(home)) {
     return
   }
-  const dir = join(home, 'claude-terminal')
+  const dir = join(home, 'cc-terminal')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
@@ -380,7 +380,7 @@ function writeCodexProfile(nodePath: string): void {
     ].join('\n')
   }
   const toml = [
-    '# Claude Terminal 生成，供 codex -p claude-terminal 使用；手动修改会被覆盖',
+    '# CC Terminal 生成，供 codex -p cc-terminal 使用；手动修改会被覆盖',
     entry('SessionStart', sessionJs),
     entry('UserPromptSubmit', stateJs, 'busy'),
     entry('PostToolUse', stateJs, 'busy'),

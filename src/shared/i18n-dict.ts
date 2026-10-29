@@ -246,7 +246,7 @@ export const I18N_EN: Record<string, string> = {
   '打开主界面': 'Open main window',
   '退出': 'Quit',
   '确认关闭': 'Confirm Close',
-  '确认关闭 Claude Terminal？': 'Close Claude Terminal?',
+  '确认关闭 CC Terminal？': 'Close CC Terminal?',
   '关闭后所有终端会话将被终止。': 'All terminal sessions will be terminated.',
 
   // 多窗口 / 标签拖出拖回

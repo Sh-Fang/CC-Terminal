@@ -9,7 +9,7 @@ import { UUID_RE } from './claude-paths'
 const IS_WIN = process.platform === 'win32'
 
 // 启动 codex 时 -p 指定的 profile；文件由 hook-assets 写到 $CODEX_HOME/<名>.config.toml
-export const CODEX_PROFILE = 'claude-terminal'
+export const CODEX_PROFILE = 'cc-terminal'
 
 export function codexHome(): string {
   return process.env.CODEX_HOME || join(homedir(), '.codex')

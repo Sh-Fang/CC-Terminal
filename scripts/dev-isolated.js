@@ -5,7 +5,7 @@ const { tmpdir } = require('node:os')
 
 const env = {
   ...process.env,
-  TERMINAL_ISOLATE_DIR: process.env.TERMINAL_ISOLATE_DIR || join(tmpdir(), 'claude-terminal-isolated'),
+  TERMINAL_ISOLATE_DIR: process.env.TERMINAL_ISOLATE_DIR || join(tmpdir(), 'cc-terminal-isolated'),
   TERMINAL_DEBUG_PORT: process.env.TERMINAL_DEBUG_PORT || '9333'
 }
 // 从 Claude Code 会话里启动时，去掉继承来的 cc 会话标记，否则实例内的 cc 会关闭对话记录保存

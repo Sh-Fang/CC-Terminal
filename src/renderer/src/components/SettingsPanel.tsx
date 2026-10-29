@@ -27,6 +27,7 @@ import { t } from "../i18n";
 import { getSettings, updateSettings } from "../controller";
 import { useAppStore } from "../state/store";
 import { ClaudeAccountSection } from "./ClaudeAccountSection";
+import { BrandLogo } from "./BrandLogo";
 import { escapeHtml } from "../lib/format";
 
 // 与 preload 的 InstalledCcVersion 同构；跨 tsconfig import 会报 TS6307，手抄一份
@@ -1772,40 +1773,9 @@ export function SettingsPanel() {
             >
               <div className="about-card">
                 <span className="about-icon" aria-hidden="true">
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="40"
-                    height="40"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <rect
-                      x="1"
-                      y="2"
-                      width="22"
-                      height="20"
-                      rx="5.5"
-                      fill="currentColor"
-                    />
-                    <polyline
-                      points="6.5 9 10 12 6.5 15"
-                      fill="none"
-                      stroke="white"
-                      strokeWidth="2.4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <line
-                      x1="12.5"
-                      y1="15"
-                      x2="17.5"
-                      y2="15"
-                      stroke="white"
-                      strokeWidth="2.4"
-                      strokeLinecap="round"
-                    />
-                  </svg>
+                  <BrandLogo size={40} />
                 </span>
-                <div className="about-name">Claude Terminal</div>
+                <div className="about-name">CC Terminal</div>
                 <div className="about-ver">
                   {t("版本")} <span id="about-version">{aboutVer}</span>
                 </div>

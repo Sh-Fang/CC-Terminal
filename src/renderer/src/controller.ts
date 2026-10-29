@@ -405,7 +405,7 @@ async function codexCommand(tab: TerminalTab, resumeId: string | null): Promise<
   }
   const dangerArg = settings.dangerousSkipPermissions ? ' --dangerously-bypass-approvals-and-sandbox' : ''
   const sub = resumeId ? ` resume ${resumeId}` : ''
-  return `codex${sub} -p claude-terminal --dangerously-bypass-hook-trust${dangerArg}`
+  return `codex${sub} -p cc-terminal --dangerously-bypass-hook-trust${dangerArg}`
 }
 
 // 右键「启动智能体」：标签页转为 Claude 标签页，在当前 shell 里起选中的智能体（主会话属于它就续上）
@@ -1554,7 +1554,7 @@ export async function initApp(): Promise<void> {
     if (isConfirmOpen()) return // 已有确认弹窗在显示，忽略重复触发
     const busy = busyCountOf(allTabs())
     confirmDialog({
-      title: t('确认关闭 Claude Terminal？'),
+      title: t('确认关闭 CC Terminal？'),
       message: busy > 0
         ? t('其中 <b>{0}</b> 个标签正在运行或待决策，关闭会立即中断。', busy)
         : '',

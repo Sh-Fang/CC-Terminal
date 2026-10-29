@@ -152,10 +152,6 @@ body.win-maximized .win-btn .ico-restore { display: block; }
   flex: 0 0 18px;
 }
 .brand-icon svg { display: block; }
-/* 图标底板是 currentColor(ink)，glyph 得用 on-primary —— 深色主题下底板变亮，
-   写死的白色 glyph 会隐身（svg 属性里的 stroke="white" 被这里覆盖） */
-.brand-icon svg polyline,
-.brand-icon svg line { stroke: var(--on-primary); }
 .titlebar-spacer { flex: 1; height: 100%; -webkit-app-region: drag; }
 
 /* macOS：系统红绿灯画在标题栏左侧 → 隐藏自绘的右侧窗口按钮，并给左侧留出红绿灯宽度，
@@ -1428,8 +1424,6 @@ mark.hl {
 }
 .about-icon { color: var(--ink); display: inline-grid; place-items: center; margin-bottom: 6px; }
 /* 图标底板 currentColor(ink)，glyph 用 on-primary —— 深色主题下底板变亮，写死白色会隐身 */
-.about-icon svg polyline,
-.about-icon svg line { stroke: var(--on-primary); }
 .about-name { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; color: var(--ink); }
 .about-ver { font-family: var(--mono); font-size: 12px; color: var(--mute); }
 .about-card .btn { margin-top: 14px; }

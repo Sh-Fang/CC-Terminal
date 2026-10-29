@@ -1,27 +1,27 @@
 <div align="center">
 
-<img src="resources/icon.png" width="96" alt="Claude Terminal logo" />
+<img src="resources/icon.png" width="96" alt="CC Terminal logo" />
 
-# Claude Terminal
+# CC Terminal
 
 <p>
-  <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows&logoColor=white" alt="platform" />
-  <img src="https://img.shields.io/github/package-json/v/Sh-Fang/ClaudeTerminal?label=version&color=orange" alt="version" />
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D4" alt="platform" />
+  <img src="https://img.shields.io/github/package-json/v/Sh-Fang/CC-Terminal?label=version&color=orange" alt="version" />
   <img src="https://img.shields.io/badge/Electron-42-47848F?logo=electron&logoColor=white" alt="electron" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="react" />
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="license" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs welcome" />
 </p>
 
-<img src="docs/screenshots/hero.png" alt="Claude Terminal 主界面" width="880" />
+<img src="docs/screenshots/hero.png" alt="CC Terminal 主界面" width="880" />
 
 </div>
 
-> **非官方项目**：本项目与 Anthropic 无关联。"Claude" 与 "Claude Code" 是 Anthropic 的商标，本项目仅是配合 Claude Code CLI 使用的第三方终端工具。
+> **非官方项目**：本项目与 Anthropic、OpenAI 无关联。"Claude"、"Claude Code" 是 Anthropic 的商标，"Codex" 是 OpenAI 的商标，本项目仅是配合 Claude Code CLI 与 Codex CLI 使用的第三方终端工具。名字里的两个 C 分别指 Claude 与 Codex。
 
 ## 介绍
 
-**为 [Claude Code](https://claude.com/claude-code) 重度用户准备的多会话管理终端，如果你也有这些痛点，不妨来试试 ：**
+**为 [Claude Code](https://claude.com/claude-code) 与 [Codex](https://github.com/openai/codex) 重度用户准备的多会话管理终端，如果你也有这些痛点，不妨来试试 ：**
 
 - 系统崩溃或者不小心把终端关闭了，需要一个个的把刚才的会话手动/resume回来
 
@@ -86,19 +86,21 @@
 
 ## 下载
 
-前往 [最新 Release](https://github.com/Sh-Fang/ClaudeTerminal/releases/latest) 下载：
+前往 [最新 Release](https://github.com/Sh-Fang/CC-Terminal/releases/latest) 下载：
 
-- **安装版** — `Claude-Terminal-x.y.z-x64.exe`，安装后自动接收应用内更新
-- **绿色版** — `Claude-Terminal-x.y.z-x64.zip`，解压即用
+- **Windows 安装版** — `CC-Terminal-x.y.z-x64.exe`，安装后自动接收应用内更新
+- **Windows 绿色版** — `CC-Terminal-x.y.z-x64.zip`，解压即用
+- **macOS** — `CC-Terminal-x.y.z-arm64.dmg`（Apple 芯片）/ `CC-Terminal-x.y.z-x64.dmg`（Intel）
+- **Linux** — `CC-Terminal-x.y.z-x86_64.AppImage` 或 `.tar.gz`
 
 ## 快速开始
 
 需要准备：
 
 - Windows 10 1809 或更新版本，并安装 [PowerShell 7](https://github.com/PowerShell/PowerShell)
-- 已安装 [Claude Code CLI](https://claude.com/claude-code)
+- 已安装 [Claude Code CLI](https://claude.com/claude-code) 或 [Codex CLI](https://github.com/openai/codex)
 
-macOS 也能构建使用，但安装包没有签名，首次打开需要右键 → 打开。
+macOS 安装包没有签名，首次打开需要右键 → 打开；提示「已损坏」时执行 `xattr -cr "/Applications/CC Terminal.app"`。
 
 ## 开发与构建
 
@@ -107,6 +109,7 @@ npm install        # .npmrc 已配好 electron 镜像与 legacy-peer-deps
 npm run dev        # 开发模式
 npm run dist       # 打包：NSIS 安装包 + 便携 zip（Windows）
 npm run dist:mac   # macOS 打包（只能在 macOS 上执行）
+npm run dist:linux # Linux 打包：AppImage + tar.gz
 ```
 
 ## 参与进来
