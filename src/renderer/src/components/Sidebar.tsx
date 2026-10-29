@@ -11,7 +11,6 @@ import { openHistory, openSavedManager, showMemoTip, hideMemoTip } from '../stat
 import { statusLabel, statusShort } from '../lib/format'
 import { icon } from '../svg-icons'
 import { t } from '../i18n'
-import { UsagePanel } from './UsagePanel'
 import type { GroupView } from '../controller'
 import type { TerminalTab } from '../terminal-tab'
 import type { TabStatus } from '../ui-helpers-types'
@@ -41,11 +40,7 @@ import {
   restoreSavedWorkspace,
   locateActiveTab,
   moveTabWithinGroup,
-  setTabDragData,
-  handleTabDragEnd,
-  isTabDragOver,
-  handleTabDrop,
-  TAB_DND_MIME
+  setTabDragData
 } from '../controller'
 
 const ORDER: Record<TabStatus, number> = { error: 4, attention: 3, done: 2, busy: 1, idle: 0 }
@@ -244,7 +239,7 @@ export function Sidebar() {
           (tabDropMark?.id === tab.id ? (tabDropMark.before ? ' drop-before' : ' drop-after') : '')
         }
         data-t={tab.id}
-        // 跨窗口拖拽：拖出成新窗/拖到另一窗合并；stopPropagation 挡住冒泡到 .group 的分组重排
+        // stopPropagation 挡住冒泡到 .group 的分组重排
         draggable={!renaming}
         onDragStart={(e) => {
           e.stopPropagation()
@@ -257,9 +252,8 @@ export function Sidebar() {
           dragTabRef.current = null
           setDragTabId(null)
           setTabDropMark(null)
-          handleTabDragEnd(e, tab.id)
         }}
-        // 本窗口同组拖动才接住画插位线；跨分组/跨窗口冒泡给容器处理迁移
+        // 同组拖动才接住画插位线
         onDragOver={(e) => {
           const d = dragTabRef.current
           if (!d || d.tabId === tab.id || d.groupId !== groupId) return
@@ -632,15 +626,6 @@ export function Sidebar() {
           </div>
           <div
             className="side-open-scroll"
-            // 跨窗口标签拖入：整个工作区滚动区都是 drop 目标
-            onDragOver={(e) => {
-              if (isTabDragOver(e.dataTransfer)) e.preventDefault()
-            }}
-            onDrop={(e) => {
-              if (!e.dataTransfer?.types.includes(TAB_DND_MIME)) return
-              e.preventDefault()
-              handleTabDrop(e.dataTransfer)
-            }}
           >
             <div id="groupList">
               {groups.length === 0 ? (
@@ -741,8 +726,6 @@ export function Sidebar() {
             <div id="savedList">{renderSavedList()}</div>
           </div>
         </section>
-
-        <UsagePanel />
 
         <div
           id="sidebarResizer"

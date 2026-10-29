@@ -17,11 +17,7 @@ import {
   startCcInActiveTab,
   switchSession,
   moveTabWithinGroup,
-  setTabDragData,
-  handleTabDragEnd,
-  isTabDragOver,
-  handleTabDrop,
-  TAB_DND_MIME
+  setTabDragData
 } from '../controller'
 import { openSettings, openSavedManager, showMemoTip, hideMemoTip } from '../state/overlays'
 import { formatTs, midEllipsis, sessionTitle, srcLabel, statusLabel } from '../lib/format'
@@ -189,15 +185,6 @@ export function Toolbar() {
       <div
         className="tabstrip"
         id="tabstrip"
-        // 跨窗口标签拖入：整条标签条都是 drop 目标
-        onDragOver={(e) => {
-          if (isTabDragOver(e.dataTransfer)) e.preventDefault()
-        }}
-        onDrop={(e) => {
-          if (!e.dataTransfer?.types.includes(TAB_DND_MIME)) return
-          e.preventDefault()
-          handleTabDrop(e.dataTransfer)
-        }}
       >
         <div className="tabstrip-list" id="tabstripList">
           {groups.length === 0 ? (
@@ -227,13 +214,12 @@ export function Toolbar() {
                       dragChipRef.current = { tabId: tb.id, groupId: g.id }
                       setDragChipId(tb.id)
                     }}
-                    onDragEnd={(e) => {
+                    onDragEnd={() => {
                       dragChipRef.current = null
                       setDragChipId(null)
                       setChipDropMark(null)
-                      handleTabDragEnd(e, tb.id)
                     }}
-                    // 同分组内拖动排序（左半 = 插到前面）；跨分组/跨窗口冒泡给容器
+                    // 同分组内拖动排序（左半 = 插到前面）
                     onDragOver={(e) => {
                       const d = dragChipRef.current
                       if (!d || d.tabId === tb.id || d.groupId !== g.id) return

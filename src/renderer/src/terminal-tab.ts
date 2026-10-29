@@ -2,7 +2,6 @@ import { Terminal, type IUnicodeVersionProvider } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
-import { SerializeAddon } from '@xterm/addon-serialize'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { backgroundFor, themeForPreset, type Settings } from './themes'
 import { t } from './i18n'
@@ -117,7 +116,6 @@ export class TerminalTab {
   readonly term: Terminal
   readonly fit: FitAddon
   readonly search: SearchAddon
-  private readonly serializer: SerializeAddon
 
   ptyId: number | null = null
   private pendingInput = ''
@@ -197,10 +195,8 @@ export class TerminalTab {
 
     this.fit = new FitAddon()
     this.search = new SearchAddon()
-    this.serializer = new SerializeAddon()
     this.term.loadAddon(this.fit)
     this.term.loadAddon(this.search)
-    this.term.loadAddon(this.serializer)
     // 宽度表对齐：xterm 内置 Unicode 6 宽度表把 emoji 记 1 格，cc（string-width）按 2 格打印，
     // 错位导致选中重绘整段平移，切 Unicode 11 对齐；U+FE0F 变体符号仍差 1 格，故捕获 addon
     // 的 provider 包装成「基字符+U+FE0F 强制宽 2」再注册覆盖 '11'。
@@ -737,39 +733,6 @@ export class TerminalTab {
     }
     try { this.term.dispose() } catch {}
     this.host.remove()
-  }
-
-  // ── 跨窗口迁移（拖出/拖回独立窗口） ──
-
-  // 整个 scrollback + 视口 + 光标/模式状态打包成 ANSI 序列，目标窗口原样 write 即可重现。
-  // 失败返回空串（画面丢失但 PTY 照常接管，可接受降级）。
-  serializeBuffer(): string {
-    try {
-      return this.serializer.serialize()
-    } catch (e) {
-      console.warn('[term] serialize failed', e)
-      return ''
-    }
-  }
-
-  // 迁出：销毁 xterm 与 DOM，但不杀 PTY（进程交给目标窗口继续用）
-  detach(): void {
-    if (this.disposed) return
-    this.disposed = true
-    this.ptyId = null // 先摘走引用，绝不能走到 kill
-    try { this.term.dispose() } catch {}
-    this.host.remove()
-  }
-
-  // 迁入：接管已存在的 PTY。调用方需先 write 序列化缓冲再 adopt，adopt 后 refit
-  // 一次把新窗口的真实尺寸推给 PTY。
-  adoptPty(id: number): void {
-    if (this.disposed) return
-    this.ptyId = id
-    if (this.pendingInput) {
-      window.term.send(id, this.pendingInput)
-      this.pendingInput = ''
-    }
   }
 }
 

@@ -12,7 +12,7 @@ import {
 import { join } from 'node:path'
 import { UUID_RE } from './claude-paths'
 import { isSessionSource } from './session-constants'
-import { resolveTabWc } from './tab-router'
+import { sendToMain } from './windows'
 
 interface FileState {
   offset: number
@@ -42,7 +42,6 @@ export class SessionEventWatcher {
   private files = new Map<string, FileState>()
   private watcher: FSWatcher | null = null
 
-  // 多窗口：事件按 tabId 路由到承载窗口（tab-router 解析，找不到兜底主窗口）
   constructor(dir: string) {
     this.dir = dir
   }
@@ -121,8 +120,6 @@ export class SessionEventWatcher {
       cwd: typeof obj.cwd === 'string' ? obj.cwd : undefined,
       ts: typeof obj.ts === 'string' ? obj.ts : undefined
     }
-    const wc = resolveTabWc(tabId)
-    if (!wc) return
-    try { wc.send('session:event', payload) } catch {}
+    sendToMain('session:event', payload)
   }
 }

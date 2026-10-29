@@ -9,186 +9,12 @@ export interface HookPaths {
   stateProbeJs: string
   eventsDir: string
   stateDir: string
-  statusDir: string
-  statuslineJs: string
   pwshProfilePs1: string  // Windows: pwsh shell-integration
   zshProfile: string      // macOS: zsh shell-integration
   bashProfile: string     // macOS: bash shell-integration
 }
 
-// statusline 探针：cc 每 ~300ms 调一次并从 stdin 喂 JSON。用 node（pwsh 冷启动太慢扛不住此频率）
-// 把会话快照按 session_id 落盘。stdout 默认留空（cc TUI 该行为空，信息都在 app 自己的底栏）；
-// app 设置里打开「在终端里显示状态行」后，改为把用户自己配的 statusLine 命令跑一遍并透传其输出，
-// 于是 app 内外的 cc 看到同一条状态行。
-const STATUSLINE_JS = `// Claude Terminal · statusline 探针
-const fs = require('fs'); const path = require('path');
-const os = require('os'); const cp = require('child_process');
-const dir = process.argv[2];
-
-// 透传节流：cc 约每 300ms 调一次，而用户命令通常是 pwsh 脚本，单次一两秒。
-// TTL 内直接复用上次输出，只有过期的那一次才真跑；超时上限防用户命令卡死拖垮状态行。
-const PASS_TTL_MS = 3000;
-const PASS_TIMEOUT_MS = 5000;
-
-// app 自己的设置（<userData>/settings.json，dir 是它下面的 session-status）
-function appSettings() {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(path.dirname(dir), 'settings.json'), 'utf8'));
-  } catch (e) { return null; }
-}
-
-// 用户自己的 statusLine 命令：按 cc 的配置优先级找第一个有 statusLine 的，
-// 项目级 local → 项目级 → 用户级。app 传的 --settings 优先级最高，正是它把这条挡掉的。
-function userStatusLineCmd(cwd) {
-  const files = [];
-  if (cwd) {
-    files.push(path.join(cwd, '.claude', 'settings.local.json'));
-    files.push(path.join(cwd, '.claude', 'settings.json'));
-  }
-  files.push(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'settings.json'));
-  for (let i = 0; i < files.length; i++) {
-    try {
-      const j = JSON.parse(fs.readFileSync(files[i], 'utf8'));
-      const sl = j && j.statusLine;
-      if (sl && sl.type === 'command' && typeof sl.command === 'string' && sl.command.trim()) {
-        const c = sl.command.trim();
-        // 自引用保护：配置指回本探针会无限套娃
-        if (c.indexOf('statusline-probe') >= 0) return '';
-        return c;
-      }
-    } catch (e) {}
-  }
-  return '';
-}
-
-// Windows: cc 用类 unix shell 跑 statusLine，用户往往配成正斜杠路径，
-// 而这里走 cmd.exe，正斜杠会被当成开关。整条就是一个存在的文件路径时换成反斜杠。
-function shellReady(cmd) {
-  if (process.platform !== 'win32') return cmd;
-  const bare = cmd.replace(/^"([^"]*)"$/, '$1');
-  if (bare.indexOf('/') < 0) return cmd;
-  if (/[&|<>^]/.test(bare)) return cmd;
-  const win = bare.replace(/\\//g, '\\\\');
-  try { if (fs.existsSync(win)) return '"' + win + '"'; } catch (e) {}
-  return cmd;
-}
-
-// 跑用户命令，把 cc 给我们的原始 stdin 原样转喂。失败/超时返回 null 由调用方退回旧缓存。
-function runUserCmd(cmd, input, cb) {
-  let settled = false;
-  let out = '';
-  const finish = (v) => { if (settled) return; settled = true; cb(v); };
-  let child;
-  try {
-    child = cp.spawn(shellReady(cmd), { shell: true, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
-  } catch (e) { return finish(null); }
-  const timer = setTimeout(() => { try { child.kill(); } catch (e) {} finish(null); }, PASS_TIMEOUT_MS);
-  child.stdout.on('data', (d) => { out += d.toString(); });
-  child.on('error', () => { clearTimeout(timer); finish(null); });
-  child.on('close', () => { clearTimeout(timer); finish(out); });
-  try { child.stdin.write(input); child.stdin.end(); } catch (e) {}
-}
-
-function passthrough(j) {
-  const s = appSettings();
-  if (!s || s.showStatusLine !== true) return;
-  const ws = j && j.workspace;
-  const cwd = (ws && (ws.current_dir || ws.project_dir)) || (j && j.cwd) || '';
-  const cmd = userStatusLineCmd(cwd);
-  if (!cmd) return;
-  const sid = (j && j.session_id) || 'default';
-  const cacheFile = path.join(dir, '_statusline-' + sid + '.txt');
-  const lockFile = cacheFile + '.lock';
-  let cached = '';
-  let age = Infinity;
-  try {
-    cached = fs.readFileSync(cacheFile, 'utf8');
-    age = Date.now() - fs.statSync(cacheFile).mtimeMs;
-  } catch (e) {}
-  if (age < PASS_TTL_MS) { process.stdout.write(cached); return; }
-  // 上一次刷新还没跑完 → 本次只吐旧内容，不再叠一个进程
-  try {
-    if (Date.now() - fs.statSync(lockFile).mtimeMs < PASS_TIMEOUT_MS) { process.stdout.write(cached); return; }
-  } catch (e) {}
-  try { fs.writeFileSync(lockFile, String(process.pid)); } catch (e) {}
-  runUserCmd(cmd, raw, (out) => {
-    try { fs.unlinkSync(lockFile); } catch (e) {}
-    if (out == null) { process.stdout.write(cached); return; }
-    const text = out.replace(/\\s+$/, '');
-    try { fs.writeFileSync(cacheFile, text); } catch (e) {}
-    process.stdout.write(text);
-  });
-}
-
-let raw = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (c) => { raw += c; });
-process.stdin.on('end', () => {
-  let parsed = null;
-  try { parsed = JSON.parse(raw); } catch (e) {}
-  try { snapshot(parsed); } catch (e) {}
-  // 落盘失败不该连累状态行，反之亦然 → 两段各自 try
-  try { passthrough(parsed); } catch (e) {}
-});
-
-function snapshot(j) {
-  {
-    if (!j) return;
-    const sid = j.session_id; if (!sid || !dir) return;
-    const cw = j.context_window || {};
-    const cu = cw.current_usage || {};
-    const tokens = (cu.input_tokens||0) + (cu.cache_creation_input_tokens||0) + (cu.cache_read_input_tokens||0);
-    let pct = cw.used_percentage;
-    if (typeof pct !== 'number' || pct <= 0) {
-      const sz = cw.context_window_size || 0;
-      pct = sz > 0 ? Math.round(tokens / sz * 100) : 0;
-    }
-    const raw_id = (j.model && j.model.id) || '';
-    const raw_label = (j.model && (j.model.display_name || j.model.id)) || '';
-    const out = {
-      sessionId: sid,
-      modelId: String(raw_id).trim(),
-      modelLabel: String(raw_label).replace(/\\s*\\([^)]*context[^)]*\\)/i, '').trim(),
-      // 旧版 statusline 字段保留，方便旧读取器和已有状态文件平滑过渡。
-      model: String(raw_label).replace(/\\s*\\([^)]*context[^)]*\\)/i, '').trim(),
-      // 当前思考强度（low/medium/high/xhigh/max）。cc 仅在模型支持 effort 时给该字段，
-      // 不支持时为空串 → 渲染层据此隐藏 effort 芯片。
-      effort: (j.effort && j.effort.level) || '',
-      window: cw.context_window_size || 0,
-      percent: Math.min(100, Math.max(0, Math.round(pct || 0))),
-      tokens: tokens,
-      savedAt: Date.now()
-    };
-    fs.mkdirSync(dir, { recursive: true });
-    const f = path.join(dir, sid + '.json'); const tmp = f + '.' + process.pid + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(out)); fs.renameSync(tmp, f);
-
-    // 账号用量（5h/周）：cc 已联网把 rate_limits 放进 stdin → 不需要我们再调 API、不依赖代理
-    const rl = j.rate_limits;
-    if (rl) {
-      const win = (w) => {
-        if (!w || typeof w.used_percentage !== 'number') return null;
-        let resetsAt = null;
-        if (typeof w.resets_at === 'number' && w.resets_at > 0) {
-          const ms = w.resets_at > 1e12 ? w.resets_at : w.resets_at * 1000;
-          resetsAt = new Date(ms).toISOString();
-        } else if (typeof w.resets_at === 'string' && w.resets_at) {
-          resetsAt = w.resets_at;
-        }
-        return { percent: Math.min(100, Math.max(0, Math.round(w.used_percentage))), resetsAt: resetsAt };
-      };
-      const fh = win(rl.five_hour); const sd = win(rl.seven_day);
-      if (fh || sd) {
-        const acct = { fiveHour: fh, sevenDay: sd, savedAt: Date.now() };
-        const af = path.join(dir, '_account-usage.json'); const atmp = af + '.' + process.pid + '.tmp';
-        fs.writeFileSync(atmp, JSON.stringify(acct)); fs.renameSync(atmp, af);
-      }
-    }
-  }
-}
-`
-
-// 解析 node 绝对路径（cc 的 statusline shell 不一定有 PATH）；
+// 解析 node 绝对路径（cc 跑 hook 的 shell 不一定有 PATH）；
 // macOS GUI 进程 PATH 极简，需借登录+交互 shell 解析。
 function detectNodePath(): string {
   if (process.platform === 'win32') {
@@ -347,8 +173,6 @@ function Global:cct {
     $settingsArg = @('--settings', $env:TERMINAL_HOOK_SETTINGS_JSON)
     # app 设置里开了「默认危险模式」→ pty:create 注入 TERMINAL_CC_DANGEROUS=1
     if ($env:TERMINAL_CC_DANGEROUS -eq '1') { $settingsArg += '--dangerously-skip-permissions' }
-    # app 设置里选了「思考强度」→ pty:create 注入 TERMINAL_CC_EFFORT（值已在主进程过白名单）
-    if ($env:TERMINAL_CC_EFFORT) { $settingsArg += @('--effort', $env:TERMINAL_CC_EFFORT) }
     if ($isResume) {
         & $claudeBin @settingsArg --resume @passArgs
     } else {
@@ -378,17 +202,14 @@ const CCT_SH = `cct() {
   # app 设置里开了「默认危险模式」→ pty:create 注入 TERMINAL_CC_DANGEROUS=1
   local danger=()
   [ "$TERMINAL_CC_DANGEROUS" = "1" ] && danger=(--dangerously-skip-permissions)
-  # app 设置里选了「思考强度」→ pty:create 注入 TERMINAL_CC_EFFORT（值已在主进程过白名单）
-  local effort=()
-  [ -n "$TERMINAL_CC_EFFORT" ] && effort=(--effort "$TERMINAL_CC_EFFORT")
   if [ "$is_resume" -eq 1 ]; then
-    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" "\${effort[@]}" --resume "\${pass[@]}"
+    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" --resume "\${pass[@]}"
   else
     local sid
     sid=$(uuidgen 2>/dev/null | tr 'A-Z' 'a-z')
     [ -z "$sid" ] && sid=$(node -e 'console.log(require("crypto").randomUUID())' 2>/dev/null)
     local name=\${TERMINAL_TAB_NAME:-cct}
-    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" "\${effort[@]}" --session-id "$sid" --name "$name" "\${pass[@]}"
+    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" --session-id "$sid" --name "$name" "\${pass[@]}"
   fi
 }
 `
@@ -470,20 +291,16 @@ export function ensureHookAssets(): HookPaths {
 
   const eventsDir = join(userData, 'session-events')
   const stateDir = join(userData, 'session-state')
-  const statusDir = join(userData, 'session-status')
   if (!existsSync(eventsDir)) mkdirSync(eventsDir, { recursive: true })
   if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
-  if (!existsSync(statusDir)) mkdirSync(statusDir, { recursive: true })
 
   const sessionProbeJs = join(userData, 'session-probe.cjs')
   const stateProbeJs = join(userData, 'state-probe.cjs')
-  const statuslineJs = join(userData, 'statusline-probe.cjs')
   const pwshProfilePs1 = join(userData, 'shell-integration.ps1')
   const zshProfile = join(userData, 'shell-integration.zsh')
   const bashProfile = join(userData, 'shell-integration.bash')
   writeFileSync(sessionProbeJs, SESSION_PROBE_JS, 'utf8')
   writeFileSync(stateProbeJs, STATE_PROBE_JS, 'utf8')
-  writeFileSync(statuslineJs, STATUSLINE_JS, 'utf8')
   writeFileSync(pwshProfilePs1, PWSH_PROFILE_PS1, 'utf8')
   writeFileSync(zshProfile, ZSH_PROFILE, 'utf8')
   writeFileSync(bashProfile, BASH_PROFILE, 'utf8')
@@ -492,10 +309,10 @@ export function ensureHookAssets(): HookPaths {
   const sessionCmd = `"${nodePath}" "${sessionProbeJs}" "${eventsDir}"`
   const stateCmd = (st: string): string =>
     `"${nodePath}" "${stateProbeJs}" "${stateDir}" ${st}`
-  const statuslineCmd = `"${nodePath}" "${statuslineJs}" "${statusDir}"`
 
   const settings = {
-    statusLine: { type: 'command', command: statuslineCmd },
+    // app 自己管理标签页与会话；cc 的 Agent view 会把会话转到后台进程，丢掉 TERMINAL_TAB_ID 导致状态失联
+    disableAgentView: true,
     hooks: {
       SessionStart: [
         { matcher: '', hooks: [{ type: 'command', command: sessionCmd }] }
@@ -526,5 +343,5 @@ export function ensureHookAssets(): HookPaths {
   const ccHooksJson = join(userData, 'cc-hooks.json')
   writeFileSync(ccHooksJson, JSON.stringify(settings, null, 2), 'utf8')
 
-  return { ccHooksJson, sessionProbeJs, stateProbeJs, eventsDir, stateDir, statusDir, statuslineJs, pwshProfilePs1, zshProfile, bashProfile }
+  return { ccHooksJson, sessionProbeJs, stateProbeJs, eventsDir, stateDir, pwshProfilePs1, zshProfile, bashProfile }
 }

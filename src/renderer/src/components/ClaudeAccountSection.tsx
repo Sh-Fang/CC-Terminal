@@ -72,9 +72,6 @@ export function ClaudeAccountSection({ active }: ClaudeAccountSectionProps) {
   useEffect(() => {
     if (!active) return
     void refreshAccounts()
-    return window.term.onClaudeAccountsChanged(() => {
-      void refreshAccounts()
-    })
   }, [active])
 
   // 面板关闭时收起下拉，避免下次打开残留展开态

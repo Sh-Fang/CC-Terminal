@@ -6,7 +6,6 @@ import {
   type ThemePreset,
   type AppTheme,
   type CursorStyle,
-  type UsageStyle,
   type CloseBehavior,
   type TabBarMode,
   type AppLanguage,
@@ -25,12 +24,7 @@ import {
 } from "../state/overlays";
 import { icon } from "../svg-icons";
 import { t } from "../i18n";
-import { getLearnedModels, getSettings, updateSettings } from "../controller";
-import {
-  EFFORT_LEVELS,
-  MODEL_MENU_MAX_H,
-  modelGroupsWithLearned,
-} from "../../../shared/claude-models";
+import { getSettings, updateSettings } from "../controller";
 import { useAppStore } from "../state/store";
 import { ClaudeAccountSection } from "./ClaudeAccountSection";
 import { escapeHtml } from "../lib/format";
@@ -43,9 +37,6 @@ interface InstalledCcVersion {
   active: boolean;
 }
 
-const FOLLOW_CC_LABEL = "跟随 Claude Code 默认";
-// effort 那格窄，长文案会被省略号截掉，用短的
-const FOLLOW_CC_SHORT = "跟随 CC";
 const CC_PAGE_SIZE = 10;
 
 // 简易 semver 比较：与主进程 cc-versions.ts 保持一致；pre-release 视为更小
@@ -123,19 +114,14 @@ interface Form {
   theme: string;
   appTheme: string;
   tabBarMode: string;
-  usageStyle: string;
   downgradeSec: string;
   closeBehavior: string;
   cursor: CursorStyle;
   cursorBlink: boolean;
   defaultCC: boolean;
   dangerMode: boolean;
-  showStatusLine: boolean;
   disableUpd: boolean;
-  showUsage: boolean;
   showFloater: boolean;
-  model: string;
-  effort: string;
   language: AppLanguage;
 }
 
@@ -151,19 +137,14 @@ function formFromSettings(s: Settings): Form {
     theme: s.terminal.theme,
     appTheme: s.appTheme,
     tabBarMode: s.tabBarMode || "vertical",
-    usageStyle: s.usageStyle || "bar",
     downgradeSec: String(s.statusDowngradeSec),
     closeBehavior: s.closeBehavior || "quit",
     cursor: s.cursor.style,
     cursorBlink: s.cursor.blink,
     defaultCC: s.defaults.autoLaunchCC,
     dangerMode: s.dangerousSkipPermissions,
-    showStatusLine: s.showStatusLine,
     disableUpd: s.disableAutoupdater,
-    showUsage: s.showClaudeUsage,
     showFloater: s.showFloater,
-    model: s.defaults.model || "",
-    effort: s.defaults.effort || "",
     language: s.language || "zh",
   };
 }
@@ -202,14 +183,10 @@ export function SettingsPanel() {
   const formRef = useRef(form);
   formRef.current = form;
   const [section, setSection] = useState("appearance");
-  const [modelOpen, setModelOpen] = useState(false);
-  const [effortOpen, setEffortOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
   const [langHintShown, setLangHintShown] = useState(false);
   const lastDisableUpdRef = useRef<boolean | null>(null);
   const scrimDownRef = useRef(false);
-  const modelBtnRef = useRef<HTMLButtonElement>(null);
-  const effortBtnRef = useRef<HTMLButtonElement>(null);
   const langBtnRef = useRef<HTMLButtonElement>(null);
   // npm 镜像下拉：时延按 url 记账
   const [npmOpen, setNpmOpen] = useState(false);
@@ -440,15 +417,11 @@ export function SettingsPanel() {
       },
       appTheme: (f.appTheme as AppTheme) || cur.appTheme,
       tabBarMode: (f.tabBarMode as TabBarMode) || cur.tabBarMode,
-      usageStyle: (f.usageStyle as UsageStyle) || cur.usageStyle,
       defaults: {
         // cwd 预填靠 lastUsedCwd 自动记忆，面板不提供手动默认路径
         cwd: cur.defaults.cwd,
         autoLaunchCC: f.defaultCC,
-        model: f.model ?? "",
-        effort: f.effort ?? "",
       },
-      showStatusLine: f.showStatusLine,
       dangerousSkipPermissions: f.dangerMode,
       // claudePath 由 CC 版本管理维护，面板不直接编辑（...cur 已带上）
       npmRegistry: f.npmReg.trim() || DEFAULT_SETTINGS.npmRegistry,
@@ -460,7 +433,6 @@ export function SettingsPanel() {
         10,
         cur.statusDowngradeSec
       ),
-      showClaudeUsage: f.showUsage,
       showFloater: f.showFloater,
       closeBehavior: (f.closeBehavior as CloseBehavior) || cur.closeBehavior,
       language: f.language || cur.language,
@@ -754,83 +726,7 @@ export function SettingsPanel() {
     return t("安装中 · {0}s", secs) + (short ? " · " + short : "");
   }
 
-  // 模型 / 语言 picker（showCtxMenu 浮层复用）；已展开时再点收起
-  function openModelPicker(): void {
-    if (modelOpen) {
-      closeCtxMenu();
-      return;
-    }
-    const cur = formRef.current.model;
-    // arg = '' 视为"跟随 cc 默认"；候选与左下芯片一致 = 内置列表 + 运行时学到的模型
-    const setVal = (v: string): void => {
-      if (formRef.current.model === v) return;
-      commit({ model: v });
-    };
-    const items: CtxItem[] = [
-      {
-        label: t(FOLLOW_CC_LABEL),
-        icon: cur === "" ? "✓" : "",
-        act: () => setVal(""),
-      },
-      { sep: true },
-    ];
-    modelGroupsWithLearned(getLearnedModels()).forEach((g, gi) => {
-      if (gi > 0) items.push({ sep: true });
-      // Opus/Sonnet 等专有名词无词条 → t() 原样回退；只有「已发现」会被翻译
-      items.push({ eyebrow: t(g.family) });
-      for (const r of g.rows) {
-        items.push({
-          label: r.label,
-          icon: r.arg === cur ? "✓" : "",
-          act: () => setVal(r.arg),
-        });
-      }
-    });
-    const btn = modelBtnRef.current;
-    if (!btn) return;
-    const r = btn.getBoundingClientRect();
-    setModelOpen(true);
-    // 候选随「已发现」增长，固定高度 + 内部滚动，不让菜单撑满整屏
-    showCtxMenu(items, r.left, r.bottom + 4, () => setModelOpen(false), {
-      minWidth: r.width,
-      maxHeight: MODEL_MENU_MAX_H,
-    });
-  }
-
-  // effort picker：候选固定四项，不封高度（比模型列表短得多）
-  function openEffortPicker(): void {
-    if (effortOpen) {
-      closeCtxMenu();
-      return;
-    }
-    const cur = formRef.current.effort;
-    const setVal = (v: string): void => {
-      if (formRef.current.effort === v) return;
-      commit({ effort: v });
-    };
-    const items: CtxItem[] = [
-      {
-        label: t(FOLLOW_CC_SHORT),
-        icon: cur === "" ? "✓" : "",
-        act: () => setVal(""),
-      },
-      { sep: true },
-      // low/medium/high 是 cc 的参数字面量，不过 t()
-      ...EFFORT_LEVELS.map((lv) => ({
-        label: lv,
-        icon: lv === cur ? "✓" : "",
-        act: () => setVal(lv),
-      })),
-    ];
-    const btn = effortBtnRef.current;
-    if (!btn) return;
-    const r = btn.getBoundingClientRect();
-    setEffortOpen(true);
-    showCtxMenu(items, r.left, r.bottom + 4, () => setEffortOpen(false), {
-      minWidth: r.width,
-    });
-  }
-
+  // 语言 picker（showCtxMenu 浮层复用）；已展开时再点收起
   // 下拉选项固定用各自语言显示，不随界面语言翻译
   function openLanguagePicker(): void {
     if (langOpen) {
@@ -1142,14 +1038,6 @@ export function SettingsPanel() {
       <span className="src">{t("走系统 PATH")}</span>
     </>
   );
-
-  // 认不出的已存值（老配置里手填的）直接显示原值，不静默回退成"跟随默认"
-  const modelLabel =
-    form.model === ""
-      ? t(FOLLOW_CC_LABEL)
-      : modelGroupsWithLearned(getLearnedModels())
-          .flatMap((g) => g.rows)
-          .find((r) => r.arg === form.model)?.label ?? form.model;
 
   return (
     <div
@@ -1638,65 +1526,6 @@ export function SettingsPanel() {
               hidden={section !== "claude"}
             >
               <ClaudeAccountSection active={open && section === "claude"} />
-              {/* 模型与 effort 是同一次启动要一起决定的两件事，并排一行 */}
-              <div className="set-row set-row-model">
-                <div className="model-cell">
-                  <label>{t("默认模型")}</label>
-                  <button
-                    type="button"
-                    className={"picker-select" + (modelOpen ? " open" : "")}
-                    id="set-default-model"
-                    data-val={form.model}
-                    ref={modelBtnRef}
-                    onClick={(e) => {
-                      e.stopPropagation(); // 挡掉 document.click 关 ctx 的兜底
-                      openModelPicker();
-                    }}
-                  >
-                    <span
-                      className={
-                        "picker-label" + (form.model === "" ? " mute" : "")
-                      }
-                    >
-                      {modelLabel}
-                    </span>
-                    <span
-                      className="picker-chev"
-                      dangerouslySetInnerHTML={{
-                        __html: icon("chevron-down", { size: 14 }),
-                      }}
-                    />
-                  </button>
-                </div>
-                <div className="effort-cell">
-                  <label>{t("思考强度")}</label>
-                  <button
-                    type="button"
-                    className={"picker-select" + (effortOpen ? " open" : "")}
-                    id="set-default-effort"
-                    data-val={form.effort}
-                    ref={effortBtnRef}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openEffortPicker();
-                    }}
-                  >
-                    <span
-                      className={
-                        "picker-label" + (form.effort === "" ? " mute" : "")
-                      }
-                    >
-                      {form.effort === "" ? t(FOLLOW_CC_SHORT) : form.effort}
-                    </span>
-                    <span
-                      className="picker-chev"
-                      dangerouslySetInnerHTML={{
-                        __html: icon("chevron-down", { size: 14 }),
-                      }}
-                    />
-                  </button>
-                </div>
-              </div>
               <div className="set-row set-row-toggle">
                 <label>{t("新建标签默认启动 Claude Code")}</label>
                 <input
@@ -1715,44 +1544,6 @@ export function SettingsPanel() {
                   onChange={(e) => commit({ dangerMode: e.target.checked })}
                 />
               </div>
-              <div className="set-row set-row-toggle">
-                <label>{t("在终端里显示 Claude Code 状态行")}</label>
-                <input
-                  id="set-show-statusline"
-                  type="checkbox"
-                  checked={form.showStatusLine}
-                  onChange={(e) => commit({ showStatusLine: e.target.checked })}
-                />
-              </div>
-              <div className="set-row set-row-usage">
-                <div className="usage-cell set-row-toggle">
-                  <label>{t("显示剩余额度")}</label>
-                  <input
-                    id="set-show-usage"
-                    type="checkbox"
-                    checked={form.showUsage}
-                    onChange={(e) => commit({ showUsage: e.target.checked })}
-                  />
-                </div>
-                <div
-                  className="usage-cell"
-                  id="set-usage-style-wrap"
-                  hidden={!form.showUsage}
-                >
-                  <label>{t("额度显示样式")}</label>
-                  {seg(
-                    "set-usage-style",
-                    t("额度显示样式"),
-                    form.usageStyle,
-                    (v) => commit({ usageStyle: v }),
-                    [
-                      { v: "bar", label: t("进度条") },
-                      { v: "ring", label: t("圆环") },
-                    ]
-                  )}
-                </div>
-              </div>
-
               <div className="set-subhead">{t("版本管理")}</div>
               <div className="set-row set-row-toggle">
                 <label>{t("禁止 Claude Code 自动升级")}</label>

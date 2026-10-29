@@ -29,7 +29,6 @@ import {
 import { icon } from './svg-icons'
 import { setLanguage, t } from './i18n'
 import { bump } from './state/store'
-import { busEmit } from './state/bus'
 import type {
   GroupView,
   SavedView,
@@ -38,14 +37,6 @@ import type {
   ManageWorkspaceView,
   HistoryEntry
 } from './app-types'
-import {
-  isKnownModel,
-  isSafeEffortValue,
-  isSafeModelValue,
-  prettyModelLabel,
-  withContextSuffix,
-  type LearnedModel
-} from '../../shared/claude-models'
 
 export type {
   GroupView,
@@ -158,27 +149,6 @@ let settingsSaveTimer: number | null = null
 
 export function getSettings(): Settings {
   return settings
-}
-
-export function getLearnedModels(): LearnedModel[] {
-  return settings.learnedModels ?? []
-}
-
-// cc statusline 报的当前会话模型即「set 成功」的证据：内置候选里没有就补进列表并落盘，
-// 两处模型选择器随即能选到它（如内置只到 opus-4-8，用户手动切到了 opus-5）。
-export function learnModelFromSession(id: string, label?: string): void {
-  if (!isSafeModelValue(id)) return
-  const learned = getLearnedModels()
-  if (isKnownModel(id, learned)) return
-  const entry: LearnedModel = {
-    id,
-    // cc 对 claude-opus-5 与 claude-opus-5[1m] 报的 display_name 都是「Opus 5」
-    label: withContextSuffix(label?.trim() || prettyModelLabel(id), id),
-    learnedAt: new Date().toISOString()
-  }
-  settings = { ...settings, learnedModels: [entry, ...learned] }
-  persistSettings()
-  refreshUI()
 }
 
 function pushFloaterCounts(): void {
@@ -482,14 +452,10 @@ async function launchCC(tab: TerminalTab): Promise<void> {
   const settingsArg = await hookSettingsArg()
   // 每次起 cc 都现读设置：改完开关再「重新加载标签」，新进程就按新模式起（不必重开 app）
   const dangerArg = settings.dangerousSkipPermissions ? ' --dangerously-skip-permissions' : ''
-  // effort 与 model 不同：它只影响本次会话、不写回历史，所以 --resume 分支也带上。
-  // 值取自白名单（isSafeEffortValue），不落 cc 的 settings.json
-  const effort = settings.defaults.effort
-  const effortArg = isSafeEffortValue(effort) ? ` --effort ${effort}` : ''
   const active = tab.activeSessionId
   let cmd: string
   if (active && UUID_RE.test(active) && (await window.term.claudeSessionExists(active))) {
-    cmd = `${invoker}${claudeCmd} --resume ${active}${effortArg}${dangerArg}${settingsArg}`
+    cmd = `${invoker}${claudeCmd} --resume ${active}${dangerArg}${settingsArg}`
   } else {
     // 幽灵会话清理：旧 UUID 对应的 jsonl 已不在，从栈里移除
     if (active && UUID_RE.test(active)) {
@@ -498,11 +464,7 @@ async function launchCC(tab: TerminalTab): Promise<void> {
     const newId = crypto.randomUUID()
     tab.activeSessionId = newId
     scheduleSave()
-    // 新会话带 --model；--resume 分支刻意不带，避免覆盖旧会话原有模型。
-    // 统一走 isSafeModelValue 校验后再 quoteShell，支持 [1m] 等完整 id，同时防注入。
-    const model = settings.defaults.model
-    const modelArg = isSafeModelValue(model) ? ` --model ${quoteShell(model)}` : ''
-    cmd = `${invoker}${claudeCmd} --session-id ${newId} --name ${quoteShell(tab.name)}${modelArg}${effortArg}${dangerArg}${settingsArg}`
+    cmd = `${invoker}${claudeCmd} --session-id ${newId} --name ${quoteShell(tab.name)}${dangerArg}${settingsArg}`
   }
   window.term.send(tab.ptyId, cmd + '\r')
 }
@@ -601,8 +563,6 @@ function makeTab(group: Group, opts: {
   if (opts.ccActive) tabRef.ccActive = true
   group.tabs.push(tabRef)
   tabRef.mount(hostsEl!)
-  // 多窗口路由：认领 tabId，主进程把该 tab 的 hook 事件推到本窗口
-  window.term.tabClaim(id)
   recordTabHistory(tabRef, group.name, true)
   return tabRef
 }
@@ -869,7 +829,6 @@ export function activateTab(tabId: string): void {
   clearDowngradeTimer()
   maybeStartDowngrade(tabId, ctx.tab.status)
   activateUI(tabId)
-  busEmit('sessionInfo:nudge')
   scheduleSave()
   recordTabHistory(ctx.tab, ctx.group.name)
 }
@@ -879,18 +838,11 @@ function disposeTabInternal(group: Group, tab: TerminalTab): void {
   if (idxInGroup < 0) return
   group.tabs.splice(idxInGroup, 1)
   tab.dispose()
-  window.term.tabRelease(tab.id)
   if (activeTabId === tab.id) {
     const next = pickNextActive(group, idxInGroup)
     activeTabId = next?.id ?? null
     if (next) activateUI(next.id)
   }
-}
-
-// 副窗口手动关空 → 自动关窗；拖走迁空由主进程迁移流程负责。
-// tabRelease 先于 winClose（IPC 保序），主进程查表已无标签直接放行。
-function maybeCloseEmptySecondary(): void {
-  if (isSecondary && groups.length === 0) window.term.winClose()
 }
 
 export function closeTab(tabId: string): void {
@@ -904,7 +856,6 @@ export function closeTab(tabId: string): void {
       const idx = groups.indexOf(group)
       if (idx >= 0) groups.splice(idx, 1)
     }
-    maybeCloseEmptySecondary()
     refreshUI()
     scheduleSave()
   }
@@ -1222,7 +1173,6 @@ function closeGroup(groupId: string): void {
   const doClose = (): void => {
     for (const t of g.tabs) {
       t.dispose()
-      window.term.tabRelease(t.id)
     }
     const idx = groups.indexOf(g)
     groups.splice(idx, 1)
@@ -1231,7 +1181,6 @@ function closeGroup(groupId: string): void {
       activeTabId = next?.id ?? null
       if (next) activateUI(next.id)
     }
-    maybeCloseEmptySecondary()
     refreshUI()
     scheduleSave()
     toast(t('已关闭分组「{0}」', g.name))
@@ -1586,7 +1535,6 @@ export async function switchSession(sessionId: string): Promise<void> {
   scheduleSave()
   await tab.restartPty()
   refreshUI()
-  busEmit('sessionInfo:nudge')
 }
 
 export function openGroupCtx(groupId: string, x: number, y: number): void {
@@ -1667,8 +1615,6 @@ export function openTabCtx(tabId: string, x: number, y: number): void {
       { label: t('在本组新建标签'), icon: icon('plus'), act: () => promptNewTabInGroup(ctx.group.id) },
       // 环境变量/cc 配置改完后就地换个新 PTY 生效，标签与会话都不动
       { label: t('重新加载标签页'), icon: icon('rotate-ccw'), act: () => reloadTab(tabId) },
-      // 刻意不传坐标：主进程会把「落点在现有窗口内」的带坐标请求当误触发拦掉
-      { label: t('移到新窗口'), icon: icon('external-link'), act: () => void moveTabToNewWindow(tabId) },
       { sep: true },
       { label: t('关闭标签'), icon: icon('close'), danger: true, act: () => closeTab(tabId) }
     ],
@@ -1975,46 +1921,6 @@ export function reorderGroups(ids: string[]): void {
   refreshUI()
 }
 
-// 外部切模型/思考强度：往活跃 tab 的 cc 注入斜杠命令；无活跃会话或 cc 正忙（busy/attention）拒绝。
-function activeCcTabForInject(): TerminalTab | null {
-  const ctx = activeContext()
-  if (!ctx) return null
-  const { tab } = ctx
-  if (tab.ptyId == null || !tab.activeSessionId) {
-    toast(t('当前标签没有活跃的 Claude 会话'))
-    return null
-  }
-  if (tab.status === 'busy' || tab.status === 'attention') {
-    toast(t('Claude 正忙，请等当前回合结束再切换'))
-    return null
-  }
-  return tab
-}
-
-// 先 Ctrl-U(\x15) 清掉输入行里可能的半截文字，避免和命令拼在一起；再发命令 + 回车。
-function injectSlash(tab: TerminalTab, line: string): void {
-  window.term.send(tab.ptyId!, '\x15' + line + '\r')
-  tab.term.focus()
-  busEmit('sessionInfo:nudge') // 模型/effort 由 cc statusline 秒级回报，催一次让状态栏早点回显
-}
-
-// /model 带参直接切；cc 会存成新会话默认，切一次即持久。
-export function switchActiveModel(arg: string, label: string): void {
-  if (!isSafeModelValue(arg)) return
-  const tab = activeCcTabForInject()
-  if (!tab) return
-  injectSlash(tab, '/model ' + arg)
-  toast(t('已切换模型 → {0}', label))
-}
-
-// /effort 带参直接设当前会话思考强度（不持久，属会话级）。
-export function switchActiveEffort(level: string): void {
-  const tab = activeCcTabForInject()
-  if (!tab) return
-  injectSlash(tab, '/effort ' + level)
-  toast(t('已切换思考强度 → {0}', level))
-}
-
 // Ctrl+S 保存当前脏分组：终端聚焦时由 TerminalTab 键处理器调（拦掉 XOFF），其余走 window keydown 兜底。
 export function saveActiveDirtyGroup(): void {
   const g = groups.find((x) => x.tabs.some((t) => t.id === activeTabId))
@@ -2192,158 +2098,15 @@ export async function restoreFromHistory(entry: HistoryEntry): Promise<void> {
   toast(t('已从历史恢复「{0}」', entry.tabName))
 }
 
-// ─── 跨窗口标签迁移（拖出成独立窗口 / 拖回合并） ─────────────────
-// 主进程（windows.ts）协调；本窗口实现两端：export（打包+detach）与 import（重建+adopt）。
-
-// 副窗口（URL 带 ?secondary=1）：不消费 open-here、不管悬浮窗开关，迁空后自动关闭。
-export const isSecondary = new URLSearchParams(location.search).has('secondary')
-
-let myWindowId = -1
-export function getWindowId(): number { return myWindowId }
-
-type TabTransferPayload = Parameters<Parameters<typeof window.term.onTabImport>[0]>[0]
-
-// 源端：打包 tab 完整状态 + serialize 终端画面 + 本地摘除（不杀 PTY）。
-// 时序关键：先 ptyHold（主进程开始暂存该 PTY 输出）再 serialize——快照与队列无缝衔接不丢字节。
-async function exportTabForTransfer(tabId: string): Promise<TabTransferPayload | null> {
-  // 重载正在换 PTY 时禁止 detach/adopt；否则目标窗口可能接到已经失效的旧 ptyId
-  if (reloadingTabs.has(tabId)) return null
-  const ctx = findTab(tabId)
-  if (!ctx) return null
-  const { group, tab } = ctx
-  if (tab.ptyId != null) {
-    try { await window.term.ptyHold(tab.ptyId) } catch {}
-    // hold 后 IPC 在途的 pty:data 还要先落进 xterm，等一个宏任务再 serialize
-    await new Promise<void>((r) => setTimeout(r, 0))
-  }
-  const payload: TabTransferPayload = {
-    tab: {
-      id: tab.id,
-      name: tab.name,
-      cwd: tab.cwd,
-      sessions: tab.sessions.map((s) => ({ ...s })),
-      activeSessionId: tab.activeSessionId,
-      autoLaunchCC: tab.autoLaunchCC,
-      status: tab.status,
-      note: tab.note,
-      memo: tab.memo,
-      dirty: tab.dirty,
-      ccActive: tab.ccActive
-    },
-    group: { id: group.id, name: group.name, cwd: group.cwd },
-    ptyId: tab.ptyId,
-    buffer: tab.serializeBuffer()
-  }
-  // 本地摘除：detach 销毁 xterm/DOM 但保留 PTY 进程；分组空了连分组一起移除
-  const idx = group.tabs.indexOf(tab)
-  if (idx >= 0) group.tabs.splice(idx, 1)
-  tab.detach()
-  if (downgradeTabId === tabId) clearDowngradeTimer()
-  if (activeTabId === tab.id) {
-    const next = pickNextActive(group, idx)
-    activeTabId = next?.id ?? null
-    if (next) activateUI(next.id)
-  }
-  if (group.tabs.length === 0) {
-    const gi = groups.indexOf(group)
-    if (gi >= 0) groups.splice(gi, 1)
-  }
-  refreshUI()
-  scheduleSave()
-  // 迁空自动关窗由主进程负责：此刻路由表未 release，渲染层自关会被误拦且可能丢迁移数据
-  return payload
-}
-
-// 目标端：重建分组（同 id → 同名同 cwd → 新建）、重建 xterm、写回画面、接管 PTY，再切路由回放队列。
-function importTransferredTab(p: TabTransferPayload): void {
-  let g = findGroup(p.group.id)
-    || groups.find((x) => x.name === p.group.name && x.cwd === p.group.cwd)
-  if (!g) {
-    g = { id: p.group.id, name: p.group.name, cwd: p.group.cwd, collapsed: false, tabs: [] }
-    groups.push(g)
-    // 已保存记录重绑 srcId（与 restoreSnapshotGroups 同语义），isGroupDirty/autoSync 才认得
-    const saved = findSavedForGroup(g)
-    if (saved) saved.srcId = g.id
-  }
-  const tab = makeTab(g, {
-    id: p.tab.id,
-    name: p.tab.name,
-    sessions: p.tab.sessions,
-    activeSessionId: p.tab.activeSessionId,
-    autoLaunchCC: p.tab.autoLaunchCC,
-    status: p.tab.status as TerminalTab['status'],
-    note: p.tab.note,
-    memo: p.tab.memo,
-    dirty: p.tab.dirty,
-    ccActive: p.tab.ccActive
-  })
-  g.collapsed = false
-  // 先写回画面快照，再接管 PTY；后续增量输出由主进程回放暂存队列衔接
-  if (p.buffer) {
-    try { tab.term.write(p.buffer) } catch {}
-  }
-  if (p.ptyId != null) tab.adoptPty(p.ptyId)
-  window.term.tabImportDone(tab.id, p.ptyId)
-  activeTabId = tab.id
-  refreshUI()
-  activateUI(tab.id) // setActive 的 rAF refit 会把新窗口真实尺寸推给 PTY（cc 收 SIGWINCH 重画）
-  scheduleSave()
-  toast(t('已移入标签「{0}」', tab.name))
-  // 迁移前 shell 已退出（无 PTY）：直接重启一个（launchCC 会按 activeSessionId 走 resume）
-  if (p.ptyId == null) void spawnTabPty(tab)
-}
-
-// UI 入口①：拖出窗口外松手 / 右键「移到新窗口」。松手点落在现有窗口内时主进程静默忽略。
-export async function moveTabToNewWindow(tabId: string, screenX?: number, screenY?: number): Promise<void> {
-  if (reloadingTabs.has(tabId)) {
-    toast(t('标签「{0}」正在重新加载', findTab(tabId)?.tab.name ?? tabId))
-    return
-  }
-  try {
-    const res = await window.term.tabMoveToWindow({ tabId, screenX, screenY })
-    if (!res.ok && res.error && res.error !== 'inside window' && res.error !== 'migrating') {
-      toast(t('移动标签失败：{0}', res.error))
-    }
-  } catch {}
-}
-
-// UI 入口②：另一个窗口的标签被拖到本窗口上松手（拖回/跨窗合并）
-export async function moveTabHere(tabId: string): Promise<void> {
-  try {
-    const res = await window.term.tabMoveToWindow({ tabId, targetWindowId: myWindowId })
-    if (!res.ok && res.error && res.error !== 'same window' && res.error !== 'migrating') {
-      toast(t('移动标签失败：{0}', res.error))
-    }
-  } catch {}
-}
-
-// 标签拖拽（Sidebar/Toolbar 共用）：Electron 同 app 多窗口 HTML5 拖拽互通，自定义 MIME 传 tabId；没人接住（dropEffect none）→ 拖出成新窗。
+// 标签拖拽（Sidebar/Toolbar 共用）：自定义 MIME 传 tabId，只用于同分组内排序
 export const TAB_DND_MIME = 'application/x-claude-tab'
 
-interface DragEventLike {
-  dataTransfer: DataTransfer | null
-  screenX: number
-  screenY: number
-}
-
-export function setTabDragData(e: DragEventLike, tabId: string): void {
-  if (!e.dataTransfer) return
-  e.dataTransfer.effectAllowed = 'move'
-  e.dataTransfer.setData(TAB_DND_MIME, JSON.stringify({ tabId, windowId: myWindowId }))
-}
-
-// dragend：没有 drop 目标接住 → 视为拖出窗口外，请求在松手处开新窗（主进程再校验）。
-export function handleTabDragEnd(e: DragEventLike, tabId: string): void {
-  if (e.dataTransfer?.dropEffect === 'none') {
-    void moveTabToNewWindow(tabId, e.screenX, e.screenY)
+export function setTabDragData(e: { dataTransfer: DataTransfer | null }, tabId: string): void {
+  if (!e.dataTransfer) {
+    return
   }
-}
-
-// drop 目标端：dragover 时调，是跨窗口标签拖拽就声明接住（调用方需 preventDefault）
-export function isTabDragOver(dt: DataTransfer | null): boolean {
-  if (!dt || !dt.types.includes(TAB_DND_MIME)) return false
-  dt.dropEffect = 'move'
-  return true
+  e.dataTransfer.effectAllowed = 'move'
+  e.dataTransfer.setData(TAB_DND_MIME, tabId)
 }
 
 // 同分组内标签拖动排序；跨分组不支持（标签 cwd 跟随分组）。
@@ -2366,29 +2129,8 @@ export function moveTabWithinGroup(tabId: string, targetTabId: string, before: b
   refreshUI()
 }
 
-// drop 落地：本窗口的 tab（窗口内拖动）忽略，交给原有交互；其他窗口的 tab → 迁移过来
-export function handleTabDrop(dt: DataTransfer | null): void {
-  const raw = dt?.getData(TAB_DND_MIME)
-  if (!raw) return
-  try {
-    const p = JSON.parse(raw) as { tabId: string; windowId: number }
-    if (!p?.tabId || p.windowId === myWindowId) return
-    void moveTabHere(p.tabId)
-  } catch {}
-}
-
-// 其他窗口落盘 settings 后的跨窗口同步：只应用不回写（落盘窗口负责持久化与悬浮窗开关）
-function applyExternalSettings(s: Settings): void {
-  const prevTabBar = settings.tabBarMode
-  settings = s
-  applySettingsToAll()
-  refreshUI()
-  if (prevTabBar !== s.tabBarMode) setTimeout(() => refitActive(), 60)
-}
-
 export async function preBoot(): Promise<void> {
   settings = await window.term.loadSettings()
-  try { myWindowId = await window.term.windowId() } catch {}
   // 语言尽早定死：后续动态渲染的 t() 都依赖它
   setLanguage(settings.language)
   // macOS 红绿灯 / 自绘窗口按钮的显隐由 body.platform-* 的 CSS 适配
@@ -2601,36 +2343,16 @@ export async function initApp(): Promise<void> {
       return
     }
     confirmDialog({
-      title: isSecondary ? t('确认关闭此窗口？') : t('确认关闭 Claude Terminal？'),
-      message: isSecondary
-        ? t('关闭后该窗口内的终端会话将被终止。确认继续？')
-        : t('关闭后所有终端会话将被终止。确认继续？'),
+      title: t('确认关闭 Claude Terminal？'),
+      message: t('关闭后所有终端会话将被终止。确认继续？'),
       okLabel: t('关闭'),
       onOk: () => window.term.winConfirmClose()
     })
   })
 
-  // ─── 跨窗口标签迁移（主/副窗口都要注册：任一窗口都可能是源或目标） ──
-  window.term.onTabExportRequest((req) => {
-    void exportTabForTransfer(req.tabId)
-      .then((payload) => window.term.tabExportReply(req.reqId, payload))
-      .catch(() => window.term.tabExportReply(req.reqId, null))
-  })
-  window.term.onTabImport((p) => {
-    try { importTransferredTab(p) } catch (e) { console.error('[migrate] import failed', e) }
-  })
-  // 其他窗口落盘引发的同步：settings 直接应用；savedGroups 从磁盘重载副本
-  window.term.onSettingsChanged((s) => applyExternalSettings(s))
-  window.term.onWorkspaceChanged(() => void hydrateSavedFromDisk().then(refreshUI))
-
   // ─── 启动恢复 ───────────────────────────────────────────────────
   await hydrateSavedFromDisk()
   refreshUI()
-  if (isSecondary) {
-    // 副窗口只上报 ready，主进程随即开始向本窗口 import
-    window.term.secondaryReady()
-    return
-  }
   window.term.floaterSetEnabled(settings.showFloater)
   if (settings.showFloater) pushFloaterCounts()
   // 悬浮窗右键"隐藏"后主进程已落盘 showFloater=false，这里同步内存副本

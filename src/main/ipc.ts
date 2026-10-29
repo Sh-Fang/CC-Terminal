@@ -14,12 +14,10 @@ import {
   versionFromPath as ccVersionFromPath
 } from './cc-versions'
 import { ensureHookAssets, type HookPaths } from './hook-assets'
-import { readSessionMeta, readSessionUsage } from './jsonl-reader'
-import { readGitBranch } from './git-info'
+import { readSessionMeta } from './jsonl-reader'
 import { loadSettings, saveSettings, type Settings } from './settings'
 import { applyDisableAutoupdater, readUserEnv } from './sys-env'
 import { readClipboardSelection, writeClipboardText } from './clipboard'
-import { getClaudeUsage } from './claude-usage'
 import {
   activateClaudeAccount,
   deleteClaudeAccount,
@@ -47,8 +45,7 @@ import {
   type HistoryEntry
 } from './tab-history'
 import { moveFloaterTo, pushCountsToFloater, setFloaterDragging, setFloaterEnabled, setFloaterFocusable } from './floater'
-import { routePtyData, setPtyRoute, releasePty } from './tab-router'
-import { allAppWebContents } from './windows'
+import { sendToMain } from './windows'
 
 function shouldDisableAutoupdate(): boolean {
   try { return loadSettings().disableAutoupdater } catch { return true }
@@ -119,27 +116,14 @@ export function registerPtyIpc(
     return err ? { ok: false, error: err } : { ok: true }
   })
 
-  // 多窗口一致性：任一窗口落盘后广播其余窗口刷新内存副本（并发写仍是后写覆盖，实用上足够）
-  const broadcastExcept = (sender: Electron.WebContents, channel: string, payload?: unknown): void => {
-    for (const wc of allAppWebContents()) {
-      if (wc === sender || wc.isDestroyed()) continue
-      try { wc.send(channel, payload) } catch {}
-    }
-  }
-
   ipcMain.handle('workspace:load', () => loadWorkspace())
-  ipcMain.handle('workspace:save', (e, ws: Workspace) => {
+  ipcMain.handle('workspace:save', (_e, ws: Workspace) => {
     saveWorkspace(ws)
-    broadcastExcept(e.sender, 'workspace:changed')
     return true
   })
 
   ipcMain.handle('settings:load', () => loadSettings())
-  ipcMain.handle('settings:save', (e, s: unknown) => {
-    const normed = saveSettings(s)
-    broadcastExcept(e.sender, 'settings:changed', normed)
-    return normed
-  })
+  ipcMain.handle('settings:save', (_e, s: unknown) => saveSettings(s))
 
   ipcMain.handle('clipboard:read', () => readClipboardSelection())
   ipcMain.handle('clipboard:write', (_e, text: unknown) =>
@@ -268,28 +252,19 @@ export function registerPtyIpc(
   ipcMain.handle('cc:currentVersion', () => {
     try { return ccVersionFromPath(loadSettings().claudePath) } catch { return null }
   })
-  ipcMain.handle('claude:usage', (_e, force?: boolean) => getClaudeUsage(!!force))
   ipcMain.handle('claude-accounts:load', () => loadClaudeAccounts())
   ipcMain.handle('claude-accounts:get', (_e, id: unknown) =>
     getClaudeAccount(typeof id === 'string' ? id : null)
   )
-  ipcMain.handle('claude-accounts:save', (e, input: unknown) => {
-    const saved = saveClaudeAccount(input as SaveClaudeAccountInput)
-    if (saved.ok) broadcastExcept(e.sender, 'claude-accounts:changed')
-    return saved
-  })
-  ipcMain.handle('claude-accounts:activate', (e, id: unknown) => {
-    const activated = activateClaudeAccount(typeof id === 'string' ? id : '')
-    if (activated.ok) broadcastExcept(e.sender, 'claude-accounts:changed')
-    return activated
-  })
-  ipcMain.handle('claude-accounts:delete', (e, id: unknown) => {
-    const deleted = deleteClaudeAccount(typeof id === 'string' ? id : '')
-    if (deleted.ok) broadcastExcept(e.sender, 'claude-accounts:changed')
-    return deleted
-  })
-  ipcMain.handle('claude:sessionUsage', (_e, sessionId: string) => readSessionUsage(sessionId))
-  ipcMain.handle('git:branch', (_e, cwd: string) => readGitBranch(cwd))
+  ipcMain.handle('claude-accounts:save', (_e, input: unknown) =>
+    saveClaudeAccount(input as SaveClaudeAccountInput)
+  )
+  ipcMain.handle('claude-accounts:activate', (_e, id: unknown) =>
+    activateClaudeAccount(typeof id === 'string' ? id : '')
+  )
+  ipcMain.handle('claude-accounts:delete', (_e, id: unknown) =>
+    deleteClaudeAccount(typeof id === 'string' ? id : '')
+  )
 
   ipcMain.handle('path:exists', (_e, p: string) => {
     if (typeof p !== 'string' || !p) return false
@@ -324,13 +299,10 @@ export function registerPtyIpc(
         // cct 手动起 cc 时也跟随「默认危险模式」。env 在 spawn 时快照 →
         // 改完开关要「重新加载标签」才对 cct 生效（渲染层自动起的 cc 则是即时生效）。
         if (s.dangerousSkipPermissions) env.TERMINAL_CC_DANGEROUS = '1'
-        // 同理，cct 手动起 cc 也跟随「思考强度」；空串 = 不注入 = 不带 --effort
-        if (s.defaults.effort) env.TERMINAL_CC_EFFORT = s.defaults.effort
       } catch {}
       if (shouldDisableAutoupdate()) {
         env.DISABLE_AUTOUPDATER = '1'
       }
-      // 多窗口：数据/退出按 ptyId 路由到承载窗口，创建时路由指向发起窗口
       const id = createPty(
         {
           cols: opts?.cols,
@@ -340,13 +312,9 @@ export function registerPtyIpc(
           freshEnv: opts?.freshEnv === true,
           profiles: { pwsh: hp.pwshProfilePs1, zsh: hp.zshProfile, bash: hp.bashProfile }
         },
-        (sid, data) => routePtyData(sid, 'pty:data', { id: sid, data }),
-        (sid, exitCode) => {
-          routePtyData(sid, 'pty:exit', { id: sid, exitCode })
-          releasePty(sid)
-        }
+        (sid, data) => sendToMain('pty:data', { id: sid, data }),
+        (sid, exitCode) => sendToMain('pty:exit', { id: sid, exitCode })
       )
-      setPtyRoute(id, _e.sender)
       return id
     }
   )

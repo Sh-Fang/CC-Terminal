@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFile, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import { isTabStatus } from './session-constants'
-import { resolveTabWc } from './tab-router'
+import { sendToMain } from './windows'
 
 interface FileState {
   debounce: NodeJS.Timeout | null
@@ -12,7 +12,6 @@ export class StateEventWatcher {
   private files = new Map<string, FileState>()
   private watcher: FSWatcher | null = null
 
-  // 多窗口：事件按 tabId 路由到承载窗口（tab-router 解析，找不到兜底主窗口）
   constructor(private dir: string) {}
 
   start(): void {
@@ -70,9 +69,7 @@ export class StateEventWatcher {
         errorKind: typeof obj.errorKind === 'string' ? obj.errorKind : undefined,
         ts: typeof obj.ts === 'string' ? obj.ts : undefined
       }
-      const wc = resolveTabWc(tabId)
-      if (!wc) return
-      try { wc.send('state:event', payload) } catch {}
+      sendToMain('state:event', payload)
     })
   }
 }

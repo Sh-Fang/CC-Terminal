@@ -12,15 +12,7 @@ import { loadSettings, saveSettings } from './settings'
 import { detectClaudePath } from './claude-helper'
 import { logEvent, startLogging, stopLogging } from './app-log'
 import { setLanguage, t } from './i18n'
-import { setFallbackWcGetter, dropWc } from './tab-router'
-import { killPty } from './pty-manager'
-import {
-  setMainWindowGetter,
-  registerWindowIpc,
-  isSecondaryWindow,
-  destroyAllSecondary,
-  setSecondaryWindowsCloseAllowed
-} from './windows'
+import { setMainWindowGetter } from './windows'
 
 // 界面语言启动时定死，切换走 app:relaunch 重启生效
 try { setLanguage(loadSettings().language) } catch {}
@@ -33,13 +25,11 @@ let tray: Tray | null = null
 function prepareUpdateInstallQuit(): void {
   updateInstallQuit = true
   allowClose = true
-  setSecondaryWindowsCloseAllowed(true)
 }
 
 function rollbackUpdateInstallQuit(): void {
   updateInstallQuit = false
   allowClose = false
-  setSecondaryWindowsCloseAllowed(false)
 }
 
 // 常驻托盘：closeBehavior='tray' 时点关闭不弹确认，窗口 hide、会话保留，从托盘唤回。
@@ -251,15 +241,13 @@ function createWindow(): void {
     mainWindow?.show()
   })
 
-  // 主窗口销毁 = 整个 app 退出，把悬浮窗/副窗口一并带走
-  mainWindow.on('closed', () => { destroyFloater(); destroyTray(); destroyAllSecondary() })
+  // 主窗口销毁 = 整个 app 退出，把悬浮窗一并带走
+  mainWindow.on('closed', () => { destroyFloater(); destroyTray() })
 
-  // 渲染进程销毁时清路由表（防崩溃残留；正常退出 PTY 由退出流程统一回收）
+  // 渲染进程销毁时回收全部 PTY（防崩溃残留；正常退出由退出流程统一回收）
   mainWindow.webContents.on('destroyed', () => {
-    if (mainWindow && !fastQuitting) {
-      for (const ptyId of dropWc(mainWindow.webContents)) {
-        try { killPty(ptyId) } catch {}
-      }
+    if (!fastQuitting) {
+      try { killAll() } catch {}
     }
   })
 
@@ -345,10 +333,7 @@ app.whenReady().then(() => {
     try { powerMonitor.on(ev as never, () => logEvent('power', { kind: ev })) } catch {}
   }
 
-  // 多窗口基建：路由兜底指向主窗口；windows.ts 拿主窗口引用；注册迁移相关 IPC
-  setFallbackWcGetter(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null))
   setMainWindowGetter(() => mainWindow)
-  registerWindowIpc()
   registerPtyIpc(() => mainWindow, {
     prepare: prepareUpdateInstallQuit,
     rollback: rollbackUpdateInstallQuit
@@ -367,20 +352,13 @@ app.whenReady().then(() => {
     try { stopWatchers() } catch {}
     try { destroyTray() } catch {}
     try { destroyFloater() } catch {}
-    try { destroyAllSecondary() } catch {}
     try { killAll() } catch {}
     try { stopLogging('relaunch') } catch {}
     app.exit(0)
   })
-  ipcMain.on('window:closeConfirmed', (e) => {
-    // 副窗口：只销毁该窗口（destroyed 监听清路由表 + 杀名下 PTY），app 继续跑
-    const win = BrowserWindow.fromWebContents(e.sender)
-    if (win && isSecondaryWindow(win)) {
-      try { win.destroy() } catch {}
-      return
-    }
+  ipcMain.on('window:closeConfirmed', () => {
     allowClose = true
-    // 主窗口：fastQuit 跳过 beforeunload/Chromium 回收慢路径（2~3s → <300ms）
+    // fastQuit 跳过 beforeunload/Chromium 回收慢路径（2~3s → <300ms）
     fastQuit('user-close')
   })
   const hp = ensureHookAssets()

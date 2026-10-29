@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { LearnedModel } from '../shared/claude-models'
 import type {
   ClaudeAccountDetail,
   ClaudeAccountResult,
@@ -9,7 +8,6 @@ import type {
 import type { UpdateActionResult, UpdateCheckResult, UpdateEvent } from '../shared/update'
 
 export type {
-  LearnedModel,
   ClaudeAccountDetail,
   ClaudeAccountResult,
   ClaudeAccountsSnapshot,
@@ -104,8 +102,6 @@ export interface HookPaths {
   stateProbeJs: string
   eventsDir: string
   stateDir: string
-  statusDir: string
-  statuslineJs: string
   pwshProfilePs1: string
   zshProfile: string
   bashProfile: string
@@ -114,7 +110,6 @@ export interface HookPaths {
 export type ThemePreset = 'vscode-dark' | 'vercel-dark' | 'one-dark'
 export type AppTheme = 'light' | 'dark'
 export type CursorStyle = 'block' | 'underline' | 'bar'
-export type UsageStyle = 'bar' | 'ring'
 export type CloseBehavior = 'quit' | 'tray'
 export type TabBarMode = 'vertical' | 'horizontal'
 export type AppLanguage = 'zh' | 'en'
@@ -125,8 +120,7 @@ export interface Settings {
   cursor: { style: CursorStyle; blink: boolean }
   terminal: { scrollback: number; theme: ThemePreset }
   appTheme: AppTheme
-  defaults: { cwd: string; autoLaunchCC: boolean; model: string; effort: string }
-  showStatusLine: boolean
+  defaults: { cwd: string; autoLaunchCC: boolean }
   dangerousSkipPermissions: boolean
   claudePath: string
   npmRegistry: string
@@ -138,15 +132,12 @@ export interface Settings {
   savedCollapsed: boolean
   sidebarSavedHeight: number
   statusDowngradeSec: number
-  showClaudeUsage: boolean
-  usageStyle: UsageStyle
   closeBehavior: CloseBehavior
   showFloater: boolean
   floaterX: number | null
   floaterY: number | null
   tabBarMode: TabBarMode
   language: AppLanguage
-  learnedModels: LearnedModel[]
 }
 
 export interface FloaterCounts {
@@ -154,22 +145,6 @@ export interface FloaterCounts {
   attention: number  // 黄点：需要决策
   busy: number       // 蓝点：运行中
   total: number      // 全 0 时退回展示当前会话总数
-}
-
-export interface UsageWindow {
-  utilization: number
-  resetsAt: string | null
-  scopeLabel?: string // 周额度按模型拆分时的模型名（如 'Fable'）；无 = 账号级总额度
-}
-export interface ClaudeUsage {
-  ok: boolean
-  error?: string
-  fiveHour?: UsageWindow
-  sevenDay?: UsageWindow
-  sevenDayModel?: UsageWindow | null // 模型级周额度（如 Fable），用于 hover 展示
-  sevenDayOpus?: UsageWindow | null
-  sevenDaySonnet?: UsageWindow | null
-  fetchedAt: number
 }
 
 // 与 src/main/clipboard.ts 的 ClipboardRead 保持一致：files / text / empty 三态
@@ -182,17 +157,6 @@ export interface SessionMeta {
   lastTs?: string
   mtime?: number
   exists: boolean
-}
-
-export interface SessionUsage {
-  exists: boolean
-  model?: string
-  modelLabel?: string
-  effort?: string
-  ctxTokens?: number
-  ctxWindow?: number
-  ctxPercent?: number
-  ctxApprox?: boolean
 }
 
 export interface InstalledCcVersion {
@@ -240,7 +204,6 @@ export interface TermBridge {
   claudeAvailable(): Promise<boolean>
   claudeSessionExists(sessionId: string): Promise<boolean>
   claudeSessionMeta(sessionId: string): Promise<SessionMeta>
-  claudeSessionUsage(sessionId: string): Promise<SessionUsage>
   claudeDetect(): Promise<string | null>
   appVersion(): Promise<string>
   // npm 镜像测速：返回响应头到达耗时 ms；超时/连不上返回 -1
@@ -252,14 +215,11 @@ export interface TermBridge {
   ccUninstall(version: string): Promise<{ ok: boolean; error?: string }>
   ccCurrentVersion(): Promise<string | null>
   onCcInstallPhase(cb: (p: { version: string; phase: string }) => void): () => void
-  claudeUsage(force?: boolean): Promise<ClaudeUsage>
   claudeAccountsLoad(): Promise<ClaudeAccountResult<ClaudeAccountsSnapshot>>
   claudeAccountGet(id: string | null): Promise<ClaudeAccountResult<ClaudeAccountDetail>>
   claudeAccountSave(input: SaveClaudeAccountInput): Promise<ClaudeAccountResult<ClaudeAccountsSnapshot>>
   claudeAccountActivate(id: string): Promise<ClaudeAccountResult<ClaudeAccountsSnapshot>>
   claudeAccountDelete(id: string): Promise<ClaudeAccountResult<ClaudeAccountsSnapshot>>
-  onClaudeAccountsChanged(cb: () => void): () => void
-  gitBranch(cwd: string): Promise<string | null>
   hookPaths(): Promise<HookPaths>
   pickDirectory(defaultPath?: string): Promise<string | null>
   pathExists(p: string): Promise<boolean>
@@ -310,51 +270,6 @@ export interface TermBridge {
   consumePendingOpenHere(): Promise<string[]>
   // 需要整体重启的场景（如语言切换）
   relaunchApp(): void
-
-  // 多窗口 / 标签跨窗口迁移
-  windowId(): Promise<number>
-  // 渲染层认领/释放 tabId：主进程按此路由 PTY 数据与 hook 事件
-  tabClaim(tabId: string): void
-  tabRelease(tabId: string): void
-  // targetWindowId 有值 = 迁到该窗口（拖回）；无值 = 在屏幕坐标处开新窗（拖出）
-  tabMoveToWindow(opts: {
-    tabId: string
-    targetWindowId?: number
-    screenX?: number
-    screenY?: number
-  }): Promise<{ ok: boolean; error?: string }>
-  // 源窗口 serialize 前调：PTY 输出进主进程暂存队列（迁移期间不丢字节）
-  ptyHold(ptyId: number): Promise<void>
-  onTabExportRequest(cb: (req: { reqId: string; tabId: string }) => void): () => void
-  tabExportReply(reqId: string, payload: TabTransferPayload | null): void
-  onTabImport(cb: (payload: TabTransferPayload) => void): () => void
-  tabImportDone(tabId: string, ptyId: number | null): void
-  // 副窗口渲染层就绪上报，主进程据此开始 import
-  secondaryReady(): void
-  // 其他窗口落盘引发的跨窗口同步
-  onSettingsChanged(cb: (s: Settings) => void): () => void
-  onWorkspaceChanged(cb: () => void): () => void
-}
-
-// 跨窗口标签迁移的传输包：源窗口打包 → 主进程转交 → 目标窗口重建
-export interface TabTransferPayload {
-  tab: {
-    id: string
-    name: string
-    cwd: string
-    sessions: SessionRecord[]
-    activeSessionId?: string
-    autoLaunchCC: boolean
-    status: string
-    note?: string
-    memo?: string
-    dirty: boolean
-    ccActive: boolean
-  }
-  group: { id: string; name: string; cwd: string }
-  ptyId: number | null
-  // xterm 缓冲区的 ANSI 序列化快照（@xterm/addon-serialize）
-  buffer: string
 }
 
 const api: TermBridge = {
@@ -371,7 +286,6 @@ const api: TermBridge = {
   claudeAvailable: () => ipcRenderer.invoke('claude:available'),
   claudeSessionExists: (sessionId) => ipcRenderer.invoke('claude:sessionExists', sessionId),
   claudeSessionMeta: (sessionId) => ipcRenderer.invoke('claude:sessionMeta', sessionId),
-  claudeSessionUsage: (sessionId) => ipcRenderer.invoke('claude:sessionUsage', sessionId),
   claudeDetect: () => ipcRenderer.invoke('claude:detect'),
   appVersion: () => ipcRenderer.invoke('app:version'),
   npmPing: (url) => ipcRenderer.invoke('npm:ping', url),
@@ -386,18 +300,11 @@ const api: TermBridge = {
     ipcRenderer.on('cc:install:phase', h)
     return () => ipcRenderer.off('cc:install:phase', h)
   },
-  claudeUsage: (force) => ipcRenderer.invoke('claude:usage', force),
   claudeAccountsLoad: () => ipcRenderer.invoke('claude-accounts:load'),
   claudeAccountGet: (id) => ipcRenderer.invoke('claude-accounts:get', id),
   claudeAccountSave: (input) => ipcRenderer.invoke('claude-accounts:save', input),
   claudeAccountActivate: (id) => ipcRenderer.invoke('claude-accounts:activate', id),
   claudeAccountDelete: (id) => ipcRenderer.invoke('claude-accounts:delete', id),
-  onClaudeAccountsChanged: (cb) => {
-    const h = (): void => cb()
-    ipcRenderer.on('claude-accounts:changed', h)
-    return () => ipcRenderer.off('claude-accounts:changed', h)
-  },
-  gitBranch: (cwd) => ipcRenderer.invoke('git:branch', cwd),
   hookPaths: () => ipcRenderer.invoke('hooks:paths'),
   pickDirectory: (defaultPath) => ipcRenderer.invoke('dialog:pickDirectory', defaultPath),
   pathExists: (p) => ipcRenderer.invoke('path:exists', p),
@@ -482,37 +389,7 @@ const api: TermBridge = {
     return () => ipcRenderer.off('app:openHere', h)
   },
   consumePendingOpenHere: () => ipcRenderer.invoke('app:consumePendingOpenHere'),
-  relaunchApp: () => ipcRenderer.send('app:relaunch'),
-
-  // 多窗口 / 标签跨窗口迁移
-  windowId: () => ipcRenderer.invoke('window:id'),
-  tabClaim: (tabId) => ipcRenderer.send('tab:claim', tabId),
-  tabRelease: (tabId) => ipcRenderer.send('tab:release', tabId),
-  tabMoveToWindow: (opts) => ipcRenderer.invoke('tab:moveToWindow', opts),
-  ptyHold: (ptyId) => ipcRenderer.invoke('pty:hold', ptyId),
-  onTabExportRequest: (cb) => {
-    const h = (_e: IpcRendererEvent, req: { reqId: string; tabId: string }) => cb(req)
-    ipcRenderer.on('tab:export-request', h)
-    return () => ipcRenderer.off('tab:export-request', h)
-  },
-  tabExportReply: (reqId, payload) => ipcRenderer.send(`tab:export-reply:${reqId}`, payload),
-  onTabImport: (cb) => {
-    const h = (_e: IpcRendererEvent, payload: TabTransferPayload) => cb(payload)
-    ipcRenderer.on('tab:import', h)
-    return () => ipcRenderer.off('tab:import', h)
-  },
-  tabImportDone: (tabId, ptyId) => ipcRenderer.send('tab:import-done', { tabId, ptyId }),
-  secondaryReady: () => ipcRenderer.send('window:secondary-ready'),
-  onSettingsChanged: (cb) => {
-    const h = (_e: IpcRendererEvent, s: Settings) => cb(s)
-    ipcRenderer.on('settings:changed', h)
-    return () => ipcRenderer.off('settings:changed', h)
-  },
-  onWorkspaceChanged: (cb) => {
-    const h = (): void => cb()
-    ipcRenderer.on('workspace:changed', h)
-    return () => ipcRenderer.off('workspace:changed', h)
-  }
+  relaunchApp: () => ipcRenderer.send('app:relaunch')
 }
 
 contextBridge.exposeInMainWorld('term', api)

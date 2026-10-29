@@ -1,17 +1,10 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import {
-  isSafeEffortValue,
-  isSafeModelValue,
-  normalizeLearnedModels,
-  type LearnedModel
-} from '../shared/claude-models'
 
 export type ThemePreset = 'vscode-dark' | 'vercel-dark' | 'one-dark'
 export type AppTheme = 'light' | 'dark'
 export type CursorStyle = 'block' | 'underline' | 'bar'
-export type UsageStyle = 'bar' | 'ring'
 export type CloseBehavior = 'quit' | 'tray'
 export type TabBarMode = 'vertical' | 'horizontal'
 export type AppLanguage = 'zh' | 'en'
@@ -35,15 +28,7 @@ export interface Settings {
   defaults: {
     cwd: string
     autoLaunchCC: boolean
-    // cc `--model` 实参；空串 = 不带 --model。仅新建会话（非 --resume）生效
-    model: string
-    // cc `--effort` 实参（low/medium/high）；空串 = 不带 --effort，跟随 cc 自身配置。
-    // 与 model 不同，新建与 --resume 都带：effort 是会话级参数，不写回历史会话
-    effort: string
   }
-  // true = statusline 探针把用户自己配的 statusLine 命令跑一遍并透传其输出，
-  // 终端里的 cc 状态行与 app 外看到的一致；false = 探针只落盘不输出，状态行留空。
-  showStatusLine: boolean
   // true = 每次启动 cc（新建会话与 --resume 都算）都带 --dangerously-skip-permissions
   dangerousSkipPermissions: boolean
   claudePath: string  // 留空 = 直接调 'claude'；填 = 用这个绝对路径（多版本切换写这里）
@@ -56,16 +41,12 @@ export interface Settings {
   savedCollapsed: boolean  // 「已保存的分组」区是否折叠到底部
   sidebarSavedHeight: number  // 「已保存的分组」区的像素高度（0 = 用 CSS 默认 40%）
   statusDowngradeSec: number   // done/attention 停留多少秒后降回 idle（1~10）
-  showClaudeUsage: boolean     // 底部状态栏展示 Claude 账号用量（5h/周）
-  usageStyle: UsageStyle       // 额度显示样式：进度条 / 左右并排圆环
   closeBehavior: CloseBehavior // 点关闭按钮：quit = 二次确认后退出（默认）；tray = 不确认，收进托盘
   showFloater: boolean         // 开启常驻悬浮窗（显示待查看 / 待决策 / 运行中 数）
   floaterX: number | null      // 悬浮窗最近一次屏幕位置（null = 未持久化，走默认位）
   floaterY: number | null
   tabBarMode: TabBarMode       // 标签栏布局：vertical = 左栏分组（默认）；horizontal = 顶部平铺
   language: AppLanguage        // 界面语言：zh = 简体中文（默认）；en = English。重启后生效
-  // 运行时从 cc statusline 学到的模型（内置候选之外的，如 opus-5）；两处模型选择器都会展示
-  learnedModels: LearnedModel[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -78,8 +59,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cursor: { style: 'block', blink: true },
   terminal: { scrollback: 5000, theme: 'vscode-dark' },
   appTheme: 'light',
-  defaults: { cwd: '', autoLaunchCC: false, model: '', effort: '' },
-  showStatusLine: false,
+  defaults: { cwd: '', autoLaunchCC: false },
   dangerousSkipPermissions: false,
   claudePath: '',
   npmRegistry: 'https://registry.npmmirror.com',
@@ -91,15 +71,12 @@ export const DEFAULT_SETTINGS: Settings = {
   savedCollapsed: false,
   sidebarSavedHeight: 0,
   statusDowngradeSec: 5,
-  showClaudeUsage: true,
-  usageStyle: 'bar',
   closeBehavior: 'quit',
   showFloater: false,
   floaterX: null,
   floaterY: null,
   tabBarMode: 'vertical',
-  language: 'zh',
-  learnedModels: []
+  language: 'zh'
 }
 
 const FILE = (): string => join(app.getPath('userData'), 'settings.json')
@@ -107,7 +84,6 @@ const FILE = (): string => join(app.getPath('userData'), 'settings.json')
 const THEMES: ThemePreset[] = ['vscode-dark', 'vercel-dark', 'one-dark']
 const APP_THEMES: AppTheme[] = ['light', 'dark']
 const CURSORS: CursorStyle[] = ['block', 'underline', 'bar']
-const USAGE_STYLES: UsageStyle[] = ['bar', 'ring']
 const CLOSE_BEHAVIORS: CloseBehavior[] = ['quit', 'tray']
 const TABBAR_MODES: TabBarMode[] = ['vertical', 'horizontal']
 const LANGUAGES: AppLanguage[] = ['zh', 'en']
@@ -155,13 +131,8 @@ function normalize(raw: unknown): Settings {
     appTheme: pick(r.appTheme, APP_THEMES, DEFAULT_SETTINGS.appTheme),
     defaults: {
       cwd: typeof def.cwd === 'string' ? def.cwd : DEFAULT_SETTINGS.defaults.cwd,
-      autoLaunchCC: typeof def.autoLaunchCC === 'boolean' ? def.autoLaunchCC : DEFAULT_SETTINGS.defaults.autoLaunchCC,
-      // 允许 cc 完整模型 id（含 [1m] 等后缀），同时限定字符集防手改 settings.json 注入命令
-      model: isSafeModelValue(def.model) ? def.model : DEFAULT_SETTINGS.defaults.model,
-      effort: isSafeEffortValue(def.effort) ? def.effort : DEFAULT_SETTINGS.defaults.effort
+      autoLaunchCC: typeof def.autoLaunchCC === 'boolean' ? def.autoLaunchCC : DEFAULT_SETTINGS.defaults.autoLaunchCC
     },
-    showStatusLine:
-      typeof r.showStatusLine === 'boolean' ? r.showStatusLine : DEFAULT_SETTINGS.showStatusLine,
     dangerousSkipPermissions:
       typeof r.dangerousSkipPermissions === 'boolean'
         ? r.dangerousSkipPermissions
@@ -185,17 +156,13 @@ function normalize(raw: unknown): Settings {
     savedCollapsed: typeof r.savedCollapsed === 'boolean' ? r.savedCollapsed : DEFAULT_SETTINGS.savedCollapsed,
     sidebarSavedHeight: clampNum(r.sidebarSavedHeight, 0, 4000, DEFAULT_SETTINGS.sidebarSavedHeight),
     statusDowngradeSec: clampNum(r.statusDowngradeSec, 1, 10, DEFAULT_SETTINGS.statusDowngradeSec),
-    showClaudeUsage:
-      typeof r.showClaudeUsage === 'boolean' ? r.showClaudeUsage : DEFAULT_SETTINGS.showClaudeUsage,
-    usageStyle: pick(r.usageStyle, USAGE_STYLES, DEFAULT_SETTINGS.usageStyle),
     closeBehavior: pick(r.closeBehavior, CLOSE_BEHAVIORS, DEFAULT_SETTINGS.closeBehavior),
     showFloater:
       typeof r.showFloater === 'boolean' ? r.showFloater : DEFAULT_SETTINGS.showFloater,
     floaterX: coord(r.floaterX),
     floaterY: coord(r.floaterY),
     tabBarMode: pick(r.tabBarMode, TABBAR_MODES, DEFAULT_SETTINGS.tabBarMode),
-    language: pick(r.language, LANGUAGES, DEFAULT_SETTINGS.language),
-    learnedModels: normalizeLearnedModels(r.learnedModels)
+    language: pick(r.language, LANGUAGES, DEFAULT_SETTINGS.language)
   }
 }
 

@@ -1,10 +1,8 @@
 import type { ITheme } from '@xterm/xterm'
-import type { LearnedModel } from '../../shared/claude-models'
 
 export type ThemePreset = 'vscode-dark' | 'vercel-dark' | 'one-dark'
 export type AppTheme = 'light' | 'dark'
 export type CursorStyle = 'block' | 'underline' | 'bar'
-export type UsageStyle = 'bar' | 'ring'
 export type CloseBehavior = 'quit' | 'tray'
 // vertical = 左侧栏分组层级（默认）；horizontal = 隐藏左栏，顶部平铺标签
 export type TabBarMode = 'vertical' | 'horizontal'
@@ -16,13 +14,7 @@ export interface Settings {
   cursor: { style: CursorStyle; blink: boolean }
   terminal: { scrollback: number; theme: ThemePreset }
   appTheme: AppTheme
-  // model = cc `--model <arg>` 实参（alias 或完整 id）；空串 = 跟随 cc 默认。
-  // 只在新建会话（非 --resume）时生效，避免覆盖旧会话原有模型。
-  // effort = cc `--effort <low|medium|high>` 实参；空串 = 不带 --effort，跟随 cc 自身配置。
-  // 与 model 不同，新建与 --resume 都带：effort 只作用于本次会话，不写回历史会话
-  defaults: { cwd: string; autoLaunchCC: boolean; model: string; effort: string }
-  // true = 探针把用户自己配的 statusLine 命令跑一遍并透传输出；false = 状态行留空
-  showStatusLine: boolean
+  defaults: { cwd: string; autoLaunchCC: boolean }
   // true = 每次启动 cc（新建与 --resume 都算）都带 --dangerously-skip-permissions
   dangerousSkipPermissions: boolean
   claudePath: string
@@ -35,16 +27,12 @@ export interface Settings {
   savedCollapsed: boolean
   sidebarSavedHeight: number   // 「已保存的分组」区像素高度（0 = 用 CSS 默认 40%）
   statusDowngradeSec: number   // done/attention 停留多少秒后降回 idle（1~10）
-  showClaudeUsage: boolean     // 底部状态栏展示 Claude 账号用量（5h/周）
-  usageStyle: UsageStyle       // 额度显示样式：进度条 / 左右并排圆环
   closeBehavior: CloseBehavior // 点关闭按钮：quit = 确认后退出；tray = 不确认，收进托盘
   showFloater: boolean         // 开启常驻悬浮窗
   floaterX: number | null
   floaterY: number | null
   tabBarMode: TabBarMode       // 标签栏布局：垂直（左栏分组）/ 水平（顶部平铺）
   language: AppLanguage        // 界面语言：zh = 简体中文（默认）；en = English。重启后生效
-  // 运行时从 cc statusline 学到的模型（内置候选之外的）；两处模型选择器都会展示
-  learnedModels: LearnedModel[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -57,8 +45,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cursor: { style: 'block', blink: true },
   terminal: { scrollback: 5000, theme: 'vscode-dark' },
   appTheme: 'light',
-  defaults: { cwd: '', autoLaunchCC: false, model: '', effort: '' },
-  showStatusLine: false,
+  defaults: { cwd: '', autoLaunchCC: false },
   dangerousSkipPermissions: false,
   claudePath: '',
   npmRegistry: 'https://registry.npmmirror.com',
@@ -70,15 +57,12 @@ export const DEFAULT_SETTINGS: Settings = {
   savedCollapsed: false,
   sidebarSavedHeight: 0,
   statusDowngradeSec: 5,
-  showClaudeUsage: true,
-  usageStyle: 'bar',
   closeBehavior: 'quit',
   showFloater: false,
   floaterX: null,
   floaterY: null,
   tabBarMode: 'vertical',
-  language: 'zh',
-  learnedModels: []
+  language: 'zh'
 }
 
 export const THEMES: Record<ThemePreset, ITheme & { label: string; backgroundCss: string }> = {

@@ -1,5 +1,5 @@
 // PTY 生命周期管理：spawn shell（Windows ConPTY / 类 Unix 原生 pty）、注入 shell-integration、
-// 读写/resize/kill。数据与退出事件经 tab-router 按 ptyId 路由到承载窗口（多窗口迁移安全）。
+// 读写/resize/kill。数据与退出事件推给主窗口。
 import * as pty from '@lydell/node-pty'
 import { existsSync } from 'node:fs'
 import { basename } from 'node:path'
