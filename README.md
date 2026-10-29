@@ -86,8 +86,8 @@ CC Terminal 只解决这几件事，其余的交给你已经在用的工具：
 |---|---|
 | Windows 安装版 | `CC-Terminal-x.y.z-x64.exe`，支持应用内更新 |
 | Windows 绿色版 | `CC-Terminal-x.y.z-x64.zip`，解压即用 |
-| macOS（Apple 芯片） | `CC-Terminal-x.y.z-arm64.dmg` |
-| macOS（Intel） | `CC-Terminal-x.y.z-x64.dmg` |
+| macOS（Apple 芯片） | `CC-Terminal-x.y.z-mac-arm64.dmg` |
+| macOS（Intel） | `CC-Terminal-x.y.z-mac-x64.dmg` |
 | Linux | `CC-Terminal-x.y.z-x86_64.AppImage` 或 `.tar.gz` |
 
 macOS 安装包没有签名：首次打开请右键 → 打开；提示「已损坏」时执行 `xattr -cr "/Applications/CC Terminal.app"`。

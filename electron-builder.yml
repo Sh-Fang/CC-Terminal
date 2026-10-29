@@ -45,10 +45,11 @@ win:
       arch: x64
 
 # macOS：不签名；打包器从 icon-mac.png 生成 icns；mac target 只能在 macOS 上构建
+# 文件名带 mac：x64 的 zip 与 Windows 便携 zip 同名，合并上传 Release 时会互相覆盖
 mac:
   category: public.app-category.developer-tools
   icon: resources/icon-mac.png
-  artifactName: CC-Terminal-${version}-${arch}.${ext}
+  artifactName: CC-Terminal-${version}-mac-${arch}.${ext}
   identity: null            # 不签名/公证，首次打开需右键→打开绕过 Gatekeeper
   hardenedRuntime: false
   target:
@@ -58,7 +59,7 @@ mac:
       arch: [arm64, x64]
 
 dmg:
-  artifactName: CC-Terminal-${version}-${arch}.${ext}
+  artifactName: CC-Terminal-${version}-mac-${arch}.${ext}
 
 linux:
   icon: resources/icon-1024.png
