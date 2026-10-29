@@ -239,9 +239,12 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => {
-    // 隔离实例放到屏幕外且不抢焦点
+    // 隔离实例：全透明、鼠标穿透、不可聚焦、不进任务栏，留在屏幕内保证持续出帧可截图
     if (isIsolated) {
-      mainWindow?.setPosition(-20000, -20000)
+      mainWindow?.setOpacity(0)
+      mainWindow?.setIgnoreMouseEvents(true)
+      mainWindow?.setFocusable(false)
+      mainWindow?.setSkipTaskbar(true)
       mainWindow?.showInactive()
       return
     }

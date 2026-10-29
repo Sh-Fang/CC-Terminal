@@ -10,7 +10,7 @@ if (isolateDir) {
   if (port) {
     app.commandLine.appendSwitch('remote-debugging-port', port)
   }
-  // 窗口放在屏幕外时避免被判定为遮挡而停止绘制
+  // 透明窗口被其它窗口盖住时避免被判定为遮挡而停止绘制
   app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
   app.commandLine.appendSwitch('disable-renderer-backgrounding')
 }
