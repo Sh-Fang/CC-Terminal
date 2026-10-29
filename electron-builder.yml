@@ -64,9 +64,13 @@ dmg:
 linux:
   icon: resources/icon-1024.png
   category: Development
-  artifactName: CC-Terminal-${version}-${arch}.${ext}
+  # deb 包必填维护者
+  maintainer: Sh-Fang <46022639+Sh-Fang@users.noreply.github.com>
+  artifactName: CC-Terminal-${version}-linux-${arch}.${ext}
   target:
     - target: AppImage
+      arch: x64
+    - target: deb
       arch: x64
     - target: tar.gz
       arch: x64

@@ -108,6 +108,7 @@ jobs:
             release/*.zip
             release/*.dmg
             release/*.AppImage
+            release/*.deb
             release/*.tar.gz
             release/*.blockmap
             release/latest*.yml

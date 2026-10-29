@@ -88,7 +88,7 @@ CC Terminal 只解决这几件事，其余的交给你已经在用的工具：
 | Windows 绿色版 | `CC-Terminal-x.y.z-x64.zip`，解压即用 |
 | macOS（Apple 芯片） | `CC-Terminal-x.y.z-mac-arm64.dmg` |
 | macOS（Intel） | `CC-Terminal-x.y.z-mac-x64.dmg` |
-| Linux | `CC-Terminal-x.y.z-x86_64.AppImage` 或 `.tar.gz` |
+| Linux | `CC-Terminal-x.y.z-linux-x86_64.AppImage`（直接运行）、`CC-Terminal-x.y.z-linux-amd64.deb`（Ubuntu / Debian 安装）或 `.tar.gz` |
 
 macOS 安装包没有签名：首次打开请右键 → 打开；提示「已损坏」时执行 `xattr -cr "/Applications/CC Terminal.app"`。
 
@@ -119,7 +119,7 @@ npm install          # .npmrc 已配好 electron 镜像与 legacy-peer-deps
 npm run dev          # 开发模式
 npm run dist         # Windows：NSIS 安装包 + 便携 zip
 npm run dist:mac     # macOS：dmg + zip（只能在 macOS 上执行）
-npm run dist:linux   # Linux：AppImage + tar.gz
+npm run dist:linux   # Linux：AppImage + deb + tar.gz
 ```
 
 推送到 `main` 且 `package.json` 的版本号还没有对应 tag 时，GitHub Actions 会在三个平台上并行打包并创建 Release。
