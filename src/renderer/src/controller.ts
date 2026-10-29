@@ -21,7 +21,7 @@ import { icon } from './svg-icons'
 import { setLanguage, t } from './i18n'
 import { bump } from './state/store'
 import type { GroupView, HistoryEntry, QuickGroup, QuickItem } from './app-types'
-import type { StoreOp, StoreSnapshot, TabRec } from '../../shared/store-types'
+import type { AgentKind, StoreOp, StoreSnapshot, TabRec } from '../../shared/store-types'
 import type { ForegroundInfo, ForegroundProgram } from '../../shared/foreground'
 
 export type { GroupView, HistoryEntry, QuickGroup, QuickItem } from './app-types'
@@ -161,7 +161,7 @@ function quoteShell(s: string, shell?: ForegroundProgram): string {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// 判断命令行是否「启动 cc」（claude / cct / claudePath basename）：命中则跳过 shell-busy，交给 cc hooks 驱动状态。
+// 判断命令行是否「启动智能体」（claude / cct / codex / claudePath basename）：命中则跳过 shell-busy，交给 hooks 驱动状态。
 function commandLineIsCcInvocation(cmd: string | undefined, claudePath: string): boolean {
   if (!cmd) return false
   const m = /^\s*(?:&\s+)?(?:'([^']*)'|"([^"]*)"|(\S+))/.exec(cmd)
@@ -171,6 +171,7 @@ function commandLineIsCcInvocation(cmd: string | undefined, claudePath: string):
   const base = exe.split(/[\\/]/).pop()!.replace(/\.(exe|cmd|ps1|bat)$/i, '')
   if (base === 'claude') return true
   if (base === 'cct') return true
+  if (base === 'codex') return true
   if (claudePath) {
     const cpBase = claudePath.toLowerCase().split(/[\\/]/).pop()?.replace(/\.(exe|cmd|ps1|bat)$/i, '') || ''
     if (cpBase && base === cpBase) return true
@@ -240,6 +241,7 @@ function sessionsOfStack(stack: string[]): SessionRecord[] {
     out.push({
       sessionId: id,
       source: s?.source ?? 'startup',
+      agent: s?.agent,
       createdAt: s?.createdAt ?? new Date().toISOString(),
       userTitle: s?.userTitle,
       ccTitle: s?.ccTitle,
@@ -328,7 +330,8 @@ function ccGateRelease(tabId: string): void {
 const resumeCcOnNextStart = new Set<string>()
 
 // shell：要把命令发进哪种 shell，决定引号与调用语法；不传则是标签页自己起的 shell
-async function launchCC(tab: TerminalTab, shell?: ForegroundProgram): Promise<void> {
+// pick：右键选的智能体；不传则跟随主会话所属的智能体（没有主会话按 Claude Code）
+async function launchCC(tab: TerminalTab, shell?: ForegroundProgram, pick?: AgentKind): Promise<void> {
   const forced = resumeCcOnNextStart.delete(tab.id)
   if (!tab.autoLaunchCC && !forced) return
   if (tab.ptyId == null) return
@@ -339,20 +342,46 @@ async function launchCC(tab: TerminalTab, shell?: ForegroundProgram): Promise<vo
     return
   }
 
+  const top = tab.activeSessionId
+  const topAgent = top ? (tab.sessions.find((x) => x.sessionId === top)?.agent ?? 'claude') : undefined
+  const agent = pick ?? topAgent ?? 'claude'
+  // 主会话属于这个智能体：还在就续上；对话记录已不在则从栈里移除，新开会话（hook 上报后成为栈顶）。
+  // 主会话属于另一个智能体：保留它，直接新开
+  let resumeId: string | null = null
+  if (top && topAgent === agent && UUID_RE.test(top)) {
+    const exists = agent === 'codex'
+      ? await window.term.codexSessionExists(top)
+      : await window.term.claudeSessionExists(top)
+    if (exists) {
+      resumeId = top
+    } else {
+      await op({ op: 'removeSession', tabId: tab.id, sessionId: top })
+    }
+  }
+  const cmd = agent === 'codex'
+    ? await codexCommand(tab, resumeId)
+    : await claudeCommand(tab, shell, resumeId)
+  if (cmd == null || tab.ptyId == null) {
+    ccGateRelease(tab.id)
+    return
+  }
+  window.term.send(tab.ptyId, cmd + '\r')
+}
+
+// 拼 claude 启动命令；claude 不可用时在终端里提示并返回 null
+async function claudeCommand(tab: TerminalTab, shell: ForegroundProgram | undefined, resumeId: string | null): Promise<string | null> {
   const claudeBin = settings.claudePath.trim()
   if (claudeBin) {
     if (!(await window.term.pathExists(claudeBin))) {
       tab.term.writeln(`\x1b[33m${t('[claude 路径不存在：{0}，跳过自动启动]', claudeBin)}\x1b[0m`)
       tab.term.writeln(`\x1b[90m${t('请到设置 → Claude Code 中重新选择 claude 可执行文件。')}\x1b[0m`)
-      ccGateRelease(tab.id)
-      return
+      return null
     }
   } else {
     const available = await window.term.claudeAvailable()
     if (!available) {
       tab.term.writeln(`\x1b[90m${t('[claude 未在 PATH 中，跳过自动启动 Claude Code]')}\x1b[0m`)
-      ccGateRelease(tab.id)
-      return
+      return null
     }
   }
   const claudeCmd = claudeBin ? quoteShell(claudeBin, shell) : 'claude'
@@ -362,27 +391,25 @@ async function launchCC(tab: TerminalTab, shell?: ForegroundProgram): Promise<vo
   const settingsArg = await hookSettingsArg(shell)
   // 每次起 cc 都现读设置：改完开关再「重新加载标签」，新进程就按新模式起（不必重开 app）
   const dangerArg = settings.dangerousSkipPermissions ? ' --dangerously-skip-permissions' : ''
-  // 主会话（栈顶）还在就续上；对话记录已不在则从栈里移除，新开会话（hook 上报后成为栈顶）
-  const top = tab.activeSessionId
-  let cmd: string
-  if (top && UUID_RE.test(top) && (await window.term.claudeSessionExists(top))) {
-    cmd = `${invoker}${claudeCmd} --resume ${top}${dangerArg}${settingsArg}`
-  } else {
-    if (top) {
-      await op({ op: 'removeSession', tabId: tab.id, sessionId: top })
-    }
-    const newId = crypto.randomUUID()
-    cmd = `${invoker}${claudeCmd} --session-id ${newId}${dangerArg}${settingsArg}`
+  if (resumeId) {
+    return `${invoker}${claudeCmd} --resume ${resumeId}${dangerArg}${settingsArg}`
   }
-  if (tab.ptyId == null) {
-    ccGateRelease(tab.id)
-    return
-  }
-  window.term.send(tab.ptyId, cmd + '\r')
+  return `${invoker}${claudeCmd} --session-id ${crypto.randomUUID()}${dangerArg}${settingsArg}`
 }
 
-// 右键「启动智能体 → Claude Code」：标签页转为 Claude 标签页，在当前 shell 里起 cc（有主会话就续上）
-export async function launchAgentInTab(tabId: string): Promise<void> {
+// 拼 codex 启动命令：-p 叠加 app 写好的 hooks profile；会话 id 由 codex 自己生成，经 SessionStart hook 上报
+async function codexCommand(tab: TerminalTab, resumeId: string | null): Promise<string | null> {
+  if (!(await window.term.codexAvailable())) {
+    tab.term.writeln(`\x1b[90m${t('[codex 未在 PATH 中，跳过启动 Codex]')}\x1b[0m`)
+    return null
+  }
+  const dangerArg = settings.dangerousSkipPermissions ? ' --dangerously-bypass-approvals-and-sandbox' : ''
+  const sub = resumeId ? ` resume ${resumeId}` : ''
+  return `codex${sub} -p claude-terminal --dangerously-bypass-hook-trust${dangerArg}`
+}
+
+// 右键「启动智能体」：标签页转为 Claude 标签页，在当前 shell 里起选中的智能体（主会话属于它就续上）
+export async function launchAgentInTab(tabId: string, agent: AgentKind): Promise<void> {
   const ctx = findTab(tabId)
   if (!ctx || ctx.tab.ptyId == null) return
   const { tab } = ctx
@@ -392,7 +419,7 @@ export async function launchAgentInTab(tabId: string): Promise<void> {
     tab.autoLaunchCC = true
     await op({ op: 'setAutoLaunch', id: tabId, autoLaunchCC: true })
   }
-  await launchCC(tab, fg.program)
+  await launchCC(tab, fg.program, agent)
   tab.term.focus()
 }
 
@@ -1103,7 +1130,10 @@ export function openTabCtx(tabId: string, x: number, y: number): void {
       {
         label: t('启动智能体'),
         icon: icon('bot'),
-        children: [{ label: 'Claude Code', icon: icon('claude'), act: () => void launchAgentInTab(tabId) }]
+        children: [
+          { label: 'Claude Code', icon: icon('claude'), act: () => void launchAgentInTab(tabId, 'claude') },
+          { label: 'Codex', icon: icon('codex'), act: () => void launchAgentInTab(tabId, 'codex') }
+        ]
       },
       { sep: true }
     )
@@ -1410,7 +1440,16 @@ export async function initApp(): Promise<void> {
     for (const t of allTabs()) if (t.ptyId === id) return t.handlePtyExit(exitCode)
   })
   const offForeground = window.term.onForeground((id, info) => {
+    const prev = fgByPty.get(id)
     fgByPty.set(id, info)
+    // 智能体退回提示符时还挂着「运行中」（如 Codex 请求出错不发 Stop）→ 降回空闲
+    if (info.atPrompt && (prev?.program === 'claude' || prev?.program === 'codex')) {
+      const tab = allTabs().find((t) => t.ptyId === id)
+      if (tab && tab.status === 'busy') {
+        tab.status = 'idle'
+        tab.note = undefined
+      }
+    }
     refreshUI()
   })
   // 渲染层重新加载后，主进程只推变化，先拉一次全量

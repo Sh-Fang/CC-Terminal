@@ -25,6 +25,7 @@ export interface TermTabHandlers {
 export interface SessionRecord {
   sessionId: string
   source: 'startup' | 'clear' | 'compact' | 'resume' | 'fork'
+  agent?: 'claude' | 'codex'
   createdAt: string
   userTitle?: string
   ccTitle?: string

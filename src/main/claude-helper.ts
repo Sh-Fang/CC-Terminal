@@ -6,7 +6,7 @@ export { sessionExists } from './claude-paths'
 const IS_WIN = process.platform === 'win32'
 
 // 用登录+交互 shell 解析命令候选路径（macOS GUI 进程 PATH 极简，-lic 让 rc 文件里的 PATH 生效）
-function whichAllViaLoginShell(name: string): string[] {
+export function whichAllViaLoginShell(name: string): string[] {
   try {
     const shell = process.env.SHELL || '/bin/zsh'
     const out = execFileSync(shell, ['-lic', `which -a ${name} 2>/dev/null || command -v ${name}`], {

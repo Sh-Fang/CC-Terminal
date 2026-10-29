@@ -337,6 +337,7 @@ export const I18N_EN: Record<string, string> = {
   '[claude 路径不存在：{0}，跳过自动启动]': '[claude path not found: {0}, skipping auto-launch]',
   '请到设置 → Claude Code 中重新选择 claude 可执行文件。': 'Go to Settings → Claude Code to re-select the claude executable.',
   '[claude 未在 PATH 中，跳过自动启动 Claude Code]': '[claude not found in PATH, skipping Claude Code auto-launch]',
+  '[codex 未在 PATH 中，跳过启动 Codex]': '[codex not found in PATH, skipping Codex launch]',
   '新分组': 'New Group',
   '路径不存在：{0}': 'Path does not exist: {0}',
   '在「{0}」新建标签': 'New tab in "{0}"',

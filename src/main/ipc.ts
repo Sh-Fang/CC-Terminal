@@ -6,6 +6,7 @@ import { createPty, killPty, killPtyAndWait, resizePty, shellPids, writePty } fr
 import { currentForeground, pokeForeground, startForegroundWatch } from './foreground'
 import { applyOp, setStoreChangeListener, snapshot, type StoreOp } from './store'
 import { detectClaudePath, isClaudeAvailable, sessionExists } from './claude-helper'
+import { codexSessionExists, isCodexAvailable } from './codex-helper'
 import {
   cancelInstall as ccCancelInstall,
   install as ccInstall,
@@ -212,6 +213,8 @@ export function registerPtyIpc(
   ipcMain.handle('app:version', () => app.getVersion())
   ipcMain.handle('claude:available', () => isClaudeAvailable())
   ipcMain.handle('claude:sessionExists', (_e, sessionId: string) => sessionExists(sessionId))
+  ipcMain.handle('codex:available', () => isCodexAvailable())
+  ipcMain.handle('codex:sessionExists', (_e, sessionId: string) => codexSessionExists(sessionId))
   ipcMain.handle('claude:sessionMeta', (_e, sessionId: string) => readSessionMeta(sessionId))
   ipcMain.handle('claude:detect', () => detectClaudePath())
   ipcMain.handle('cc:listInstalled', () => {

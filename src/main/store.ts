@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path'
 import { isSessionSource } from './session-constants'
 import type {
+  AgentKind,
   GroupRec,
   SessionSource,
   SessionRec,
@@ -81,6 +82,7 @@ function normalize(raw: unknown): StoreData {
     sessions.push({
       id: o.id as string,
       source: isSessionSource(o.source) ? o.source : 'startup',
+      agent: o.agent === 'codex' ? 'codex' : undefined,
       createdAt: str(o.createdAt) ?? nowIso(),
       lastTs: str(o.lastTs),
       userTitle: str(o.userTitle),
@@ -141,10 +143,10 @@ function sessionOf(id: string): SessionRec | undefined {
   return load().sessions.find((s) => s.id === id)
 }
 
-function ensureSession(id: string, source: SessionSource, ts?: string): SessionRec {
+function ensureSession(id: string, source: SessionSource, ts?: string, agent?: AgentKind): SessionRec {
   let s = sessionOf(id)
   if (!s) {
-    s = { id, source, createdAt: ts ?? nowIso() }
+    s = { id, source, agent, createdAt: ts ?? nowIso() }
     load().sessions.push(s)
   }
   return s
@@ -173,7 +175,7 @@ export function applySessionStart(ev: SessionStartEvent): StoreSnapshot | null {
   // 父标签页里：之前没在跑（刚启动）或跑的就是栈顶 → 视为主会话里的操作；下一层始终是临时会话
   const fromTop = !isChild && (prevRunning === undefined || prevRunning === tab.stack[0])
   const inStack = tab.stack.includes(ev.sessionId)
-  const sess = ensureSession(ev.sessionId, ev.source, ev.ts)
+  const sess = ensureSession(ev.sessionId, ev.source, ev.ts, ev.agent)
   if (ev.ts && (!sess.lastTs || ev.ts > sess.lastTs)) {
     sess.lastTs = ev.ts
   }

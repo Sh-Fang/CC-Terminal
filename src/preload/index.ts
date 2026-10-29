@@ -136,6 +136,8 @@ export interface TermBridge {
   onStoreChanged(cb: (s: StoreSnapshot) => void): () => void
   claudeAvailable(): Promise<boolean>
   claudeSessionExists(sessionId: string): Promise<boolean>
+  codexAvailable(): Promise<boolean>
+  codexSessionExists(sessionId: string): Promise<boolean>
   claudeSessionMeta(sessionId: string): Promise<SessionMeta>
   claudeDetect(): Promise<string | null>
   appVersion(): Promise<string>
@@ -220,6 +222,8 @@ const api: TermBridge = {
   },
   claudeAvailable: () => ipcRenderer.invoke('claude:available'),
   claudeSessionExists: (sessionId) => ipcRenderer.invoke('claude:sessionExists', sessionId),
+  codexAvailable: () => ipcRenderer.invoke('codex:available'),
+  codexSessionExists: (sessionId) => ipcRenderer.invoke('codex:sessionExists', sessionId),
   claudeSessionMeta: (sessionId) => ipcRenderer.invoke('claude:sessionMeta', sessionId),
   claudeDetect: () => ipcRenderer.invoke('claude:detect'),
   appVersion: () => ipcRenderer.invoke('app:version'),

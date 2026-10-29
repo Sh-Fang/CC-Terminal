@@ -2,10 +2,14 @@
 
 export type SessionSource = 'startup' | 'clear' | 'compact' | 'resume' | 'fork'
 
+/** 会话所属的智能体；旧数据没有该字段，按 claude 处理 */
+export type AgentKind = 'claude' | 'codex'
+
 /** 会话元信息；对话内容在 cc 的 jsonl 里，这里只记标题与时间 */
 export interface SessionRec {
   id: string
   source: SessionSource
+  agent?: AgentKind
   createdAt: string
   lastTs?: string
   // 用户在 app 里手动改的名字
@@ -55,6 +59,7 @@ export interface SessionStartEvent {
   tabId: string
   sessionId: string
   source: SessionSource
+  agent?: AgentKind
   ts?: string
 }
 

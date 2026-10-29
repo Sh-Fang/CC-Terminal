@@ -6,6 +6,7 @@ import { icon } from '../svg-icons'
 
 const ICON_OF: Record<ForegroundProgram, Parameters<typeof icon>[0]> = {
   claude: 'claude',
+  codex: 'codex',
   pwsh: 'square-terminal',
   cmd: 'terminal',
   sh: 'square-terminal'

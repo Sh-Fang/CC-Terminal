@@ -118,6 +118,7 @@ export class SessionEventWatcher {
       tabId,
       sessionId,
       source,
+      agent: obj.agent === 'codex' ? ('codex' as const) : undefined,
       cwd: typeof obj.cwd === 'string' ? obj.cwd : undefined,
       ts: typeof obj.ts === 'string' ? obj.ts : undefined
     }

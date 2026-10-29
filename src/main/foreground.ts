@@ -26,6 +26,11 @@ const AGENTS: AgentEntry[] = [
     program: 'claude',
     exe: /^claude(\.exe)?$/i,
     cmdline: /@anthropic-ai[\\/]claude-code|[\\/]claude(\.cmd|\.js)?["'\s]|^claude(\s|$)/i
+  },
+  {
+    program: 'codex',
+    exe: /^codex(\.exe)?$/i,
+    cmdline: /@openai[\\/]codex|[\\/]codex(\.js)?(["'\s]|$)|^codex(\s|$)/i
   }
 ]
 

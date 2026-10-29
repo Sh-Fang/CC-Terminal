@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
+import { CODEX_PROFILE, codexHome } from './codex-helper'
 
 export interface HookPaths {
   ccHooksJson: string
@@ -42,9 +43,10 @@ function detectNodePath(): string {
 
 // SessionStart hook（node）。必须用 node 而非 pwsh：PS 冷启动慢 + 并发 IO 异常会导致
 // 非零退出、jsonl 丢行。出错路径全部 swallow + 始终 exit 0，hook 失败不影响 cc 主流程。
-const SESSION_PROBE_JS = `// Claude Terminal · SessionStart hook
+// dirExpr：事件目录取值表达式；agent：写进事件行的智能体，cc 不写（默认 claude）
+const sessionProbeSource = (dirExpr: string, agent?: string): string => `// Claude Terminal · SessionStart hook
 const fs = require('fs'); const path = require('path');
-const dir = process.argv[2];
+const dir = ${dirExpr};
 const tab = process.env.TERMINAL_TAB_ID || '';
 let raw = '';
 process.stdin.setEncoding('utf8');
@@ -60,7 +62,8 @@ process.stdin.on('end', () => {
     const row = {
       sessionId: sid,
       cwd: (j && j.cwd) || '',
-      source: (j && j.source) || 'startup',
+      source: (j && j.source) || 'startup',${agent ? `
+      agent: '${agent}',` : ''}
       ts: new Date().toISOString()
     };
     try { fs.mkdirSync(dir, { recursive: true }); } catch (e) {}
@@ -69,11 +72,12 @@ process.stdin.on('end', () => {
 });
 `
 
-// 状态 hook（node）：state 走 argv[3]，dir 走 argv[2]；先写 .tmp 再 rename 避免 watcher 读到半截 JSON。
-const STATE_PROBE_JS = `// Claude Terminal · 状态 hook
+// 状态 hook（node）：先写 .tmp 再 rename 避免 watcher 读到半截 JSON。
+// cc 版 dir 走 argv[2]、state 走 argv[3]；Codex 版 dir 取 env、state 走 argv[2]
+const stateProbeSource = (dirExpr: string, stateExpr: string): string => `// Claude Terminal · 状态 hook
 const fs = require('fs'); const path = require('path');
-const dir = process.argv[2];
-const state = process.argv[3] || 'idle';
+const dir = ${dirExpr};
+const state = ${stateExpr} || 'idle';
 const tab = process.env.TERMINAL_TAB_ID || '';
 let raw = '';
 process.stdin.setEncoding('utf8');
@@ -297,8 +301,8 @@ export function ensureHookAssets(): HookPaths {
   const pwshProfilePs1 = join(userData, 'shell-integration.ps1')
   const zshProfile = join(userData, 'shell-integration.zsh')
   const bashProfile = join(userData, 'shell-integration.bash')
-  writeFileSync(sessionProbeJs, SESSION_PROBE_JS, 'utf8')
-  writeFileSync(stateProbeJs, STATE_PROBE_JS, 'utf8')
+  writeFileSync(sessionProbeJs, sessionProbeSource('process.argv[2]'), 'utf8')
+  writeFileSync(stateProbeJs, stateProbeSource('process.argv[2]', 'process.argv[3]'), 'utf8')
   writeFileSync(pwshProfilePs1, PWSH_PROFILE_PS1, 'utf8')
   writeFileSync(zshProfile, ZSH_PROFILE, 'utf8')
   writeFileSync(bashProfile, BASH_PROFILE, 'utf8')
@@ -341,5 +345,47 @@ export function ensureHookAssets(): HookPaths {
   const ccHooksJson = join(userData, 'cc-hooks.json')
   writeFileSync(ccHooksJson, JSON.stringify(settings, null, 2), 'utf8')
 
+  try { writeCodexProfile(nodePath) } catch {}
+
   return { ccHooksJson, sessionProbeJs, stateProbeJs, eventsDir, stateDir, pwshProfilePs1, zshProfile, bashProfile }
+}
+
+// Codex 的 hooks 写成一份独立 profile（$CODEX_HOME/claude-terminal.config.toml），只在 codex -p 时叠加，
+// 不碰用户自己的 config.toml / hooks.json。探针放在 Codex 目录下、事件目录走 env，
+// 这样正式实例和隔离实例写出的文件一致，hook 事件各自落回启动它的实例。
+// Windows 上 Codex 用 PowerShell 跑 hook，命令要 & 调用；其余平台走 sh。
+function writeCodexProfile(nodePath: string): void {
+  const home = codexHome()
+  if (!existsSync(home)) {
+    return
+  }
+  const dir = join(home, 'claude-terminal')
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  const sessionJs = join(dir, 'session-probe.cjs')
+  const stateJs = join(dir, 'state-probe.cjs')
+  writeFileSync(sessionJs, sessionProbeSource('process.env.TERMINAL_EVENTS_DIR', 'codex'), 'utf8')
+  writeFileSync(stateJs, stateProbeSource('process.env.TERMINAL_STATE_DIR', 'process.argv[2]'), 'utf8')
+
+  const entry = (event: string, script: string, arg = ''): string => {
+    const tail = `"${nodePath}" "${script}"${arg ? ` ${arg}` : ''}`
+    return [
+      `[[hooks.${event}]]`,
+      `[[hooks.${event}.hooks]]`,
+      'type = "command"',
+      `command = '${tail}'`,
+      `commandWindows = '& ${tail}'`,
+      ''
+    ].join('\n')
+  }
+  const toml = [
+    '# Claude Terminal 生成，供 codex -p claude-terminal 使用；手动修改会被覆盖',
+    entry('SessionStart', sessionJs),
+    entry('UserPromptSubmit', stateJs, 'busy'),
+    entry('PostToolUse', stateJs, 'busy'),
+    entry('PermissionRequest', stateJs, 'attention'),
+    entry('Stop', stateJs, 'done')
+  ].join('\n')
+  writeFileSync(join(home, `${CODEX_PROFILE}.config.toml`), toml, 'utf8')
 }
