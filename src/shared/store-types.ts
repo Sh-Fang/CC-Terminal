@@ -8,7 +8,12 @@ export interface SessionRec {
   source: SessionSource
   createdAt: string
   lastTs?: string
+  // 用户在 app 里手动改的名字
   userTitle?: string
+  // cc 里 /rename 写入的标题
+  ccTitle?: string
+  // 第一条用户消息（截断）
+  firstPrompt?: string
 }
 
 /** 标签页；stack 为会话栈，栈顶在前；closedAt 有值即历史标签页 */
@@ -69,4 +74,4 @@ export type StoreOp =
   | { op: 'setTop'; tabId: string; sessionId: string }
   | { op: 'removeSession'; tabId: string; sessionId: string }
   | { op: 'renameSession'; id: string; title: string | null }
-  | { op: 'touchSession'; id: string; lastTs: string }
+  | { op: 'refreshMeta'; ids: string[] }

@@ -263,7 +263,7 @@ export function registerPtyIpc(
 
   ipcMain.handle(
     'pty:create',
-    (_e, opts: { cols?: number; rows?: number; cwd?: string; tabId?: string; tabName?: string; freshEnv?: boolean }) => {
+    (_e, opts: { cols?: number; rows?: number; cwd?: string; tabId?: string; freshEnv?: boolean }) => {
       if (opts?.cwd) {
         try {
           if (!existsSync(opts.cwd)) throw new Error(`目录不存在: ${opts.cwd}`)
@@ -281,7 +281,6 @@ export function registerPtyIpc(
       }
       // cct 命令依赖的 env；tab 名只在 spawn 时快照，后续改名不跟进（可接受）
       env.TERMINAL_HOOK_SETTINGS_JSON = hp.ccHooksJson
-      if (opts?.tabName) env.TERMINAL_TAB_NAME = opts.tabName
       try {
         const s = loadSettings()
         const cp = s.claudePath?.trim()

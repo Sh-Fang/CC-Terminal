@@ -150,8 +150,8 @@ if ($env:__TERMINAL_SHELL_INTEG -ne '1') {
 
 # cct: 手动启动一次能被 app 接管的 cc 会话。
 # - 复用 pty:create 时注入的 env：
-#   TERMINAL_TAB_ID / TERMINAL_HOOK_SETTINGS_JSON / TERMINAL_CLAUDE_PATH / TERMINAL_TAB_NAME
-# - 无参 → --session-id <新 uuid> --name <tab>：新会话，hook 上报后 app 压栈
+#   TERMINAL_TAB_ID / TERMINAL_HOOK_SETTINGS_JSON / TERMINAL_CLAUDE_PATH
+# - 无参 → --session-id <新 uuid>：新会话，hook 上报后 app 压栈
 # - -r / --resume → --resume：cc 自己弹选择器让用户选历史会话
 # - 其余参数原样透传给 claude（可 cct --model xxx 等）
 function Global:cct {
@@ -177,8 +177,7 @@ function Global:cct {
         & $claudeBin @settingsArg --resume @passArgs
     } else {
         $sid = [guid]::NewGuid().ToString()
-        $name = if ($env:TERMINAL_TAB_NAME) { $env:TERMINAL_TAB_NAME } else { 'cct' }
-        & $claudeBin @settingsArg --session-id $sid --name $name @passArgs
+        & $claudeBin @settingsArg --session-id $sid @passArgs
     }
 }
 `
@@ -208,8 +207,7 @@ const CCT_SH = `cct() {
     local sid
     sid=$(uuidgen 2>/dev/null | tr 'A-Z' 'a-z')
     [ -z "$sid" ] && sid=$(node -e 'console.log(require("crypto").randomUUID())' 2>/dev/null)
-    local name=\${TERMINAL_TAB_NAME:-cct}
-    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" --session-id "$sid" --name "$name" "\${pass[@]}"
+    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" --session-id "$sid" "\${pass[@]}"
   fi
 }
 `

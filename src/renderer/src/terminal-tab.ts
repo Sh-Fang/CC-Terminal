@@ -27,6 +27,8 @@ export interface SessionRecord {
   source: 'startup' | 'clear' | 'compact' | 'resume' | 'fork'
   createdAt: string
   userTitle?: string
+  ccTitle?: string
+  firstPrompt?: string
   lastTs?: string
 }
 
@@ -532,7 +534,6 @@ export class TerminalTab {
         rows: this.term.rows,
         cwd: this.cwd,
         tabId: this.id,
-        tabName: this.name,
         freshEnv
       })
       // create 期间 tab 可能已 dispose（ptyId 尚为 null，dispose 杀不到）：立即 kill 防进程泄漏

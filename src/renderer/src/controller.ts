@@ -3,7 +3,7 @@
 // 进程态（PTY、状态点、cc 是否活跃）只在渲染层；改动后调 refreshUI() 触发订阅 rev 的组件重渲染。
 import { TerminalTab, type SessionRecord } from './terminal-tab'
 import { DEFAULT_SETTINGS, type Settings } from './themes'
-import { defaultSessionTitle } from './lib/format'
+import { sessionTitle } from './lib/format'
 import {
   confirmDialog,
   isConfirmOpen,
@@ -204,6 +204,8 @@ function sessionsOfStack(stack: string[]): SessionRecord[] {
       source: s?.source ?? 'startup',
       createdAt: s?.createdAt ?? new Date().toISOString(),
       userTitle: s?.userTitle,
+      ccTitle: s?.ccTitle,
+      firstPrompt: s?.firstPrompt,
       lastTs: s?.lastTs
     })
   }
@@ -324,7 +326,7 @@ async function launchCC(tab: TerminalTab): Promise<void> {
       await op({ op: 'removeSession', tabId: tab.id, sessionId: top })
     }
     const newId = crypto.randomUUID()
-    cmd = `${invoker}${claudeCmd} --session-id ${newId} --name ${quoteShell(tab.name)}${dangerArg}${settingsArg}`
+    cmd = `${invoker}${claudeCmd} --session-id ${newId}${dangerArg}${settingsArg}`
   }
   if (tab.ptyId == null) {
     ccGateRelease(tab.id)
@@ -462,14 +464,11 @@ async function spawnTabsBatched(tabs: TerminalTab[]): Promise<void> {
   }
 }
 
-// 从 cc 对话记录补最后活跃时间
+// 从 cc 对话记录补会话的最后活跃时间与标题来源（主进程读文件）
 async function refreshSessionMeta(tab: TerminalTab): Promise<void> {
-  for (const s of tab.sessions) {
-    const meta = await window.term.claudeSessionMeta(s.sessionId)
-    if (!meta.exists) continue
-    if (meta.lastTs && meta.lastTs !== s.lastTs) {
-      await op({ op: 'touchSession', id: s.sessionId, lastTs: meta.lastTs })
-    }
+  const ids = tab.sessions.map((s) => s.sessionId)
+  if (ids.length > 0) {
+    await op({ op: 'refreshMeta', ids })
   }
 }
 
@@ -834,13 +833,13 @@ async function openSessionInNewTab(sessionId: string): Promise<void> {
   const { group, tab } = ctx
   const sess = tab.sessions.find((s) => s.sessionId === sessionId)
   if (!sess) return
-  const name = tabNameForSession(sess)
+  const name = tabNameForSession(sess, tab)
   await openNewTab(await createTab(group.id, name, true, [sessionId]))
   toast(t('已在新标签打开会话「{0}」', name))
 }
 
-function tabNameForSession(s: SessionRecord): string {
-  const raw = s.userTitle || t('会话 {0}', s.sessionId.slice(0, 8))
+function tabNameForSession(s: SessionRecord, tab: TerminalTab): string {
+  const raw = sessionTitle(s, tab.sessions, tab.name)
   return raw.length > 20 ? raw.slice(0, 19) + '…' : raw
 }
 
@@ -897,7 +896,7 @@ async function deleteSession(sessionId: string): Promise<void> {
   const sess = tab.sessions.find((s) => s.sessionId === sessionId)
   if (!sess) return
   const wasTop = tab.activeSessionId === sessionId
-  const title = sess.userTitle || defaultSessionTitle(sess, tab.sessions)
+  const title = sessionTitle(sess, tab.sessions, tab.name)
   confirmDialog({
     title: t('删除会话「{0}」？', title),
     message: wasTop
@@ -1180,6 +1179,10 @@ export async function initApp(): Promise<void> {
     }
     ctx.tab.status = ev.state
     ctx.tab.note = ev.message
+    // 一轮结束：首条消息、/rename 标题可能刚写进对话记录
+    if (ev.state === 'done') {
+      void refreshSessionMeta(ctx.tab)
+    }
     // 状态变了 → 重置该 tab 之前未触发的降级；若仍是当前 tab 且新态需降级，重启倒计时
     if (ev.tabId === downgradeTabId) clearDowngradeTimer()
     if (activeTabId === ev.tabId) maybeStartDowngrade(ev.tabId, ev.state)

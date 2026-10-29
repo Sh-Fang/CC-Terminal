@@ -120,7 +120,7 @@ export interface CcRemoteResult {
 }
 export interface TermBridge {
   platform: NodeJS.Platform  // 'win32' | 'darwin' | ...：渲染层据此切换 shell 引号/窗口按钮
-  create(opts: { cols: number; rows: number; cwd?: string; tabId?: string; tabName?: string; freshEnv?: boolean }): Promise<number>
+  create(opts: { cols: number; rows: number; cwd?: string; tabId?: string; freshEnv?: boolean }): Promise<number>
   send(id: number, data: string): void
   resize(id: number, cols: number, rows: number): void
   kill(id: number): void

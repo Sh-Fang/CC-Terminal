@@ -15,6 +15,7 @@ import type {
   TabRec
 } from '../shared/store-types'
 import { migrateLegacy } from './store-migrate'
+import { readSessionMeta } from './jsonl-reader'
 
 export type { StoreOp, StoreSnapshot } from '../shared/store-types'
 
@@ -82,7 +83,9 @@ function normalize(raw: unknown): StoreData {
       source: isSessionSource(o.source) ? o.source : 'startup',
       createdAt: str(o.createdAt) ?? nowIso(),
       lastTs: str(o.lastTs),
-      userTitle: str(o.userTitle)
+      userTitle: str(o.userTitle),
+      ccTitle: str(o.ccTitle),
+      firstPrompt: str(o.firstPrompt)
     })
   }
   return { version: 1, groups, tabs, sessions, activeTabId: str(r.activeTabId) ?? null }
@@ -332,10 +335,19 @@ export function applyOp(o: StoreOp): StoreSnapshot {
       }
       break
     }
-    case 'touchSession': {
-      const s = sessionOf(o.id)
-      if (s && (!s.lastTs || o.lastTs > s.lastTs)) {
-        s.lastTs = o.lastTs
+    case 'refreshMeta': {
+      // 从 cc 对话记录补最后活跃时间、/rename 标题、首条消息
+      for (const id of o.ids) {
+        const s = sessionOf(id)
+        const meta = s ? readSessionMeta(id) : null
+        if (!s || !meta?.exists) {
+          continue
+        }
+        if (meta.lastTs && (!s.lastTs || meta.lastTs > s.lastTs)) {
+          s.lastTs = meta.lastTs
+        }
+        s.ccTitle = meta.customTitle
+        s.firstPrompt = meta.firstPrompt ?? s.firstPrompt
       }
       break
     }

@@ -153,7 +153,7 @@ export function Toolbar() {
                   <span className="sdot"></span>
                   <div className="sess-body">
                     {/* 超长标题保留头尾、中间省略 */}
-                    <div className="sess-title">{midEllipsis(sessionTitle(s, tab.sessions))}</div>
+                    <div className="sess-title">{midEllipsis(sessionTitle(s, tab.sessions, tab.name))}</div>
                     {/* 三栏均分：时间 / 会话ID / 状态（当前 > 来源标注；clear 来源为空） */}
                     <div className="sess-meta">
                       <span>{formatTs(s.lastTs || s.createdAt)}</span>
@@ -390,7 +390,7 @@ export function Toolbar() {
             {curSess ? formatTs(curSess.lastTs || curSess.createdAt) : ''}
           </span>
           <span className="title" id="sessTitle">
-            {!cur ? t('（无活动标签）') : curSess ? sessionTitle(curSess, cur.tab.sessions) : t('（未创建会话）')}
+            {!cur ? t('（无活动标签）') : curSess ? sessionTitle(curSess, cur.tab.sessions, cur.tab.name) : t('（未创建会话）')}
           </span>
           <span className="caret">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -259,6 +259,19 @@ export function defaultSessionTitle(sess: SessionRecord, sessions: SessionRecord
   return t('会话 {0}', idx >= 0 ? idx + 1 : sessions.length)
 }
 
-export function sessionTitle(sess: SessionRecord, sessions: SessionRecord[]): string {
-  return sess.userTitle || defaultSessionTitle(sess, sessions)
+const PROMPT_TITLE_MAX = 30
+
+// 会话标题：手动改名 > cc 里 /rename 的标题 > 首条消息前 30 字 > 「会话 N」。
+// 旧版启动 cc 时带过 --name <标签页名>，那种 custom-title 等于标签页名，不算自动标题
+export function sessionTitle(sess: SessionRecord, sessions: SessionRecord[], tabName?: string): string {
+  if (sess.userTitle) {
+    return sess.userTitle
+  }
+  if (sess.ccTitle && sess.ccTitle !== tabName) {
+    return sess.ccTitle
+  }
+  if (sess.firstPrompt) {
+    return sess.firstPrompt.length > PROMPT_TITLE_MAX ? sess.firstPrompt.slice(0, PROMPT_TITLE_MAX) + '…' : sess.firstPrompt
+  }
+  return defaultSessionTitle(sess, sessions)
 }
