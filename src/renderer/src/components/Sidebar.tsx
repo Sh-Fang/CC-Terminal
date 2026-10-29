@@ -438,6 +438,7 @@ export function Sidebar() {
       <aside className={'sidebar' + (settings.sidebarCollapsed ? ' collapsed' : '')} id="sidebar" ref={sidebarRef}>
         <section className="side-section side-open">
           <div className="side-section-label">
+            {t('工作区')}
             <span className="line"></span>
             <button
               id="newGroupBtn"

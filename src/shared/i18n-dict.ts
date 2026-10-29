@@ -525,6 +525,7 @@ export const I18N_EN: Record<string, string> = {
   '5h额度': '5h limit',
   '本周额度': 'Weekly limit',
   '{0}额度': '{0} limit',
+  '工作区': 'Workspace',
   '暂无会话': 'No sessions',
   '重新加载会中断正在进行的回合。': 'Reloading will interrupt the turn in progress.',
   '重新加载会中断正在运行的命令。': 'Reloading will interrupt the running command.',
