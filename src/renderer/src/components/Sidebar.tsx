@@ -7,7 +7,7 @@ import type {
   MouseEvent as RMouseEvent
 } from 'react'
 import { useAppStore } from '../state/store'
-import { openHistory, showMemoTip, hideMemoTip } from '../state/overlays'
+import { openQuickOpen, showMemoTip, hideMemoTip } from '../state/overlays'
 import { statusLabel, statusShort } from '../lib/format'
 import { icon } from '../svg-icons'
 import { t } from '../i18n'
@@ -35,7 +35,8 @@ import {
   reorderGroups,
   locateActiveTab,
   moveTabWithinGroup,
-  setTabDragData
+  setTabDragData,
+  getChildren
 } from '../controller'
 
 const ORDER: Record<TabStatus, number> = { error: 4, attention: 3, done: 2, busy: 1, idle: 0 }
@@ -324,6 +325,38 @@ export function Sidebar() {
     )
   }
 
+  // 标签页下一层的临时会话：缩进一层，点击切过去，关闭只销毁这个终端
+  const renderChildRow = (c: TerminalTab, active: boolean) => {
+    const st = (c.status ?? 'idle') as TabStatus
+    const dotTitle = c.note ? t('{0}：{1}', statusLabel(st), c.note) : statusLabel(st)
+    return (
+      <div
+        key={c.id}
+        className={'tab-row child-row' + (active ? ' active' : '')}
+        data-t={c.id}
+        data-testid={`child-row-${c.id}`}
+        onClick={() => activateTab(c.id)}
+      >
+        <span className={`st-dot st-${st}`} title={dotTitle}></span>
+        <span className="trow-name" title={c.name}>
+          {c.name}
+        </span>
+        <span className="trow-actions">
+          <span
+            className="trow-close"
+            data-testid={`child-close-${c.id}`}
+            title={t('关闭')}
+            onClick={(e) => {
+              e.stopPropagation()
+              closeTab(c.id)
+            }}
+            dangerouslySetInnerHTML={{ __html: icon('close', { size: 12, stroke: 2 }) }}
+          />
+        </span>
+      </div>
+    )
+  }
+
   const renderGroup = (g: GroupView) => {
     const gs = groupStatus(g)
     const cwdTitle = g.cwd ? g.cwd : t('使用用户主目录')
@@ -394,7 +427,12 @@ export function Sidebar() {
             />
           </span>
         </div>
-        <div className="group-tabs">{g.tabs.map((tab) => renderTabRow(tab, activeTabId === tab.id, g.id))}</div>
+        <div className="group-tabs">
+          {g.tabs.flatMap((tab) => [
+            renderTabRow(tab, activeTabId === tab.id, g.id),
+            ...getChildren(tab.id).map((c) => renderChildRow(c, activeTabId === c.id))
+          ])}
+        </div>
       </div>
     )
   }
@@ -468,12 +506,13 @@ export function Sidebar() {
               }}
             />
             <button
-              id="historyOpenBtn"
+              id="quickOpenBtn"
+              data-testid="sidebar-quick-open"
               className="side-head-btn"
               type="button"
-              title={t('标签历史')}
-              aria-label={t('标签历史')}
-              onClick={() => openHistory()}
+              title={t('搜索（Ctrl+P）')}
+              aria-label={t('搜索（Ctrl+P）')}
+              onClick={() => openQuickOpen()}
             >
               <svg
                 width="13"
@@ -486,9 +525,8 @@ export function Sidebar() {
                 strokeLinejoin="round"
                 aria-hidden="true"
               >
-                <path d="M3 12a9 9 0 1 0 3-6.7" />
-                <path d="M3 4v5h5" />
-                <path d="M12 7v5l3 2" />
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
               </svg>
             </button>
             <button

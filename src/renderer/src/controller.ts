@@ -3,7 +3,7 @@
 // 进程态（PTY、状态点、cc 是否活跃）只在渲染层；改动后调 refreshUI() 触发订阅 rev 的组件重渲染。
 import { TerminalTab, type SessionRecord } from './terminal-tab'
 import { DEFAULT_SETTINGS, type Settings } from './themes'
-import { sessionTitle } from './lib/format'
+import { fuzzySearch, sessionTitle, type Range } from './lib/format'
 import {
   confirmDialog,
   isConfirmOpen,
@@ -12,6 +12,7 @@ import {
   openSearchOverlay,
   closeSearchOverlay,
   closeSearchOverlayIfOpen,
+  toggleQuickOpen,
   showCtxMenu,
   toast,
   type CtxItem
@@ -19,10 +20,10 @@ import {
 import { icon } from './svg-icons'
 import { setLanguage, t } from './i18n'
 import { bump } from './state/store'
-import type { GroupView, HistoryEntry } from './app-types'
+import type { GroupView, HistoryEntry, QuickGroup, QuickItem } from './app-types'
 import type { StoreOp, StoreSnapshot, TabRec } from '../../shared/store-types'
 
-export type { GroupView, HistoryEntry } from './app-types'
+export type { GroupView, HistoryEntry, QuickGroup, QuickItem } from './app-types'
 
 // hosts 元素：xterm 命令式挂载的宿主容器。initApp 开头 await hostsReady，保证恢复标签时 hostsEl 可用。
 let hostsEl: HTMLDivElement | null = null
@@ -54,6 +55,30 @@ export function isCcTab(t: TerminalTab): boolean {
 
 // 运行中的分组（至少有一个打开的标签页）；顺序与 store.groups 一致
 const groups: Group[] = []
+// 标签页下一层的临时会话终端：父标签页 id → 子终端（只在运行时存在，重启不恢复）
+const children = new Map<string, TerminalTab[]>()
+let childSeq = 0
+const CHILD_SEP = '__c'
+
+function isChildId(id: string): boolean {
+  return id.includes(CHILD_SEP)
+}
+
+// 所有运行中的终端：标签页 + 其下一层临时会话
+function allTabs(): TerminalTab[] {
+  return groups.flatMap((g) => g.tabs.flatMap((t) => [t, ...(children.get(t.id) ?? [])]))
+}
+
+export function getChildren(tabId: string): TerminalTab[] {
+  return children.get(tabId) ?? []
+}
+
+// 会话标题按所属标签页计算：下一层的临时会话借用父标签页的会话栈与名字
+export function sessionTitleIn(tab: TerminalTab, sess: SessionRecord): string {
+  const parent = isChildId(tab.id) ? findTab(tab.id.slice(0, tab.id.indexOf(CHILD_SEP)))?.tab : undefined
+  const owner = parent ?? tab
+  return sessionTitle(sess, owner.sessions, owner.name)
+}
 let store: StoreSnapshot = { version: 1, groups: [], tabs: [], sessions: [], activeTabId: null, running: {} }
 let activeTabId: string | null = null
 let settings: Settings = DEFAULT_SETTINGS
@@ -67,7 +92,7 @@ function pushFloaterCounts(): void {
   if (!settings.showFloater) return
   let done = 0, attention = 0, busy = 0, total = 0
   for (const g of groups) {
-    for (const t of g.tabs) {
+    for (const t of g.tabs.flatMap((x) => [x, ...(children.get(x.id) ?? [])])) {
       total++
       const st = t.status ?? 'idle'
       if (st === 'done') done++
@@ -85,7 +110,7 @@ function refreshUI(): void {
 }
 
 function applySettingsToAll(): void {
-  for (const g of groups) for (const t of g.tabs) t.applySettings(settings)
+  for (const t of allTabs()) t.applySettings(settings)
 }
 
 export function updateSettings(s: Settings): void {
@@ -160,8 +185,11 @@ async function hookSettingsArg(): Promise<string> {
 
 function findTab(tabId: string): { group: Group; tab: TerminalTab } | null {
   for (const g of groups) {
-    const t = g.tabs.find((x) => x.id === tabId)
-    if (t) return { group: g, tab: t }
+    for (const t of g.tabs) {
+      if (t.id === tabId) return { group: g, tab: t }
+      const c = children.get(t.id)?.find((x) => x.id === tabId)
+      if (c) return { group: g, tab: c }
+    }
   }
   return null
 }
@@ -233,6 +261,13 @@ function applySnapshot(snap: StoreSnapshot): void {
       tab.autoLaunchCC = tr.autoLaunchCC
       tab.sessions = sessionsOfStack(tr.stack)
       tab.activeSessionId = tr.stack[0]
+      for (const c of children.get(tab.id) ?? []) {
+        const cs = tab.sessions.find((x) => x.sessionId === c.activeSessionId)
+        if (cs) {
+          c.sessions = [cs]
+          c.name = sessionTitle(cs, tab.sessions, tab.name)
+        }
+      }
     }
   }
   const order = snap.groups.map((x) => x.id)
@@ -348,17 +383,46 @@ export function startCcInActiveTab(): void {
 
 // 为一条已在 store 里的标签页记录建运行中的标签（xterm + 回调），不起 PTY
 function mountTab(group: Group, rec: TabRec): TerminalTab {
-  const id = rec.id
+  const tab = buildTab(group, {
+    id: rec.id,
+    name: rec.name,
+    sessions: sessionsOfStack(rec.stack),
+    activeSessionId: rec.stack[0],
+    autoLaunchCC: rec.autoLaunchCC,
+    memo: rec.memo
+  })
+  group.tabs.push(tab)
+  return tab
+}
+
+// 标签页下一层打开一个临时会话：独立终端，挂在父标签页下，--resume 该会话
+function mountChild(group: Group, parent: TerminalTab, sessionId: string): TerminalTab {
+  const sess = parent.sessions.find((x) => x.sessionId === sessionId)
+  const child = buildTab(group, {
+    id: `${parent.id}${CHILD_SEP}${++childSeq}`,
+    name: sess ? sessionTitle(sess, parent.sessions, parent.name) : sessionId.slice(0, 8),
+    sessions: sess ? [sess] : [],
+    activeSessionId: sessionId,
+    autoLaunchCC: true
+  })
+  children.set(parent.id, [...(children.get(parent.id) ?? []), child])
+  return child
+}
+
+function buildTab(group: Group, opts: {
+  id: string
+  name: string
+  sessions: SessionRecord[]
+  activeSessionId?: string
+  autoLaunchCC: boolean
+  memo?: string
+}): TerminalTab {
+  const id = opts.id
   let tabRef!: TerminalTab
   tabRef = new TerminalTab(
     {
-      id,
-      name: rec.name,
+      ...opts,
       cwd: group.cwd,
-      sessions: sessionsOfStack(rec.stack),
-      activeSessionId: rec.stack[0],
-      autoLaunchCC: rec.autoLaunchCC,
-      memo: rec.memo,
       settings
     },
     {
@@ -392,6 +456,8 @@ function mountTab(group: Group, rec: TabRec): TerminalTab {
           tabRef.ccActive = false
           // cc 刚退回 pwsh：无条件复位鼠标/焦点追踪，防 cc 异常退出漏关模式后鼠标移动狂刷乱码
           tabRef.resetInputTrackingModes()
+          // 不再有会话在跑，免得之后误报「同一会话重复打开」
+          void op({ op: 'clearRunning', tabId: id })
           refreshUI()
         }
         // cc tab 状态完全交给 cc hooks，shell 事件不参与
@@ -411,7 +477,6 @@ function mountTab(group: Group, rec: TabRec): TerminalTab {
       }
     }
   )
-  group.tabs.push(tabRef)
   tabRef.mount(hostsEl!)
   return tabRef
 }
@@ -466,7 +531,8 @@ async function spawnTabsBatched(tabs: TerminalTab[]): Promise<void> {
 
 // 从 cc 对话记录补会话的最后活跃时间与标题来源（主进程读文件）
 async function refreshSessionMeta(tab: TerminalTab): Promise<void> {
-  const ids = tab.sessions.map((s) => s.sessionId)
+  const owner = isChildId(tab.id) ? findTab(tab.id.slice(0, tab.id.indexOf(CHILD_SEP)))?.tab ?? tab : tab
+  const ids = owner.sessions.map((s) => s.sessionId)
   if (ids.length > 0) {
     await op({ op: 'refreshMeta', ids })
   }
@@ -559,7 +625,7 @@ export async function promptNewTabInGroup(groupId: string): Promise<void> {
 }
 
 function activateUI(tabId: string): void {
-  for (const g of groups) for (const t of g.tabs) t.setActive(t.id === tabId)
+  for (const t of allTabs()) t.setActive(t.id === tabId)
   refreshUI()
 }
 
@@ -638,7 +704,9 @@ export function activateTab(tabId: string): void {
   clearDowngradeTimer()
   maybeStartDowngrade(tabId, ctx.tab.status)
   activateUI(tabId)
-  void op({ op: 'setActiveTab', id: tabId })
+  if (!isChildId(tabId)) {
+    void op({ op: 'setActiveTab', id: tabId })
+  }
 }
 
 // 从运行中摘除一批标签（销毁 xterm/PTY），空分组一并移除，并挑下一个激活
@@ -647,8 +715,15 @@ function unmountTabs(ids: string[]): void {
   for (const g of [...groups]) {
     const idx = g.tabs.findIndex((x) => ids.includes(x.id))
     for (const tab of g.tabs.filter((x) => ids.includes(x.id))) {
+      for (const c of children.get(tab.id) ?? []) {
+        c.dispose()
+      }
+      children.delete(tab.id)
       tab.dispose()
       if (downgradeTabId === tab.id) clearDowngradeTimer()
+    }
+    if (activeTabId && isChildId(activeTabId) && ids.some((x) => activeTabId!.startsWith(x + CHILD_SEP))) {
+      activeTabId = activeTabId.slice(0, activeTabId.indexOf(CHILD_SEP))
     }
     g.tabs = g.tabs.filter((x) => !ids.includes(x.id))
     if (activeTabId && ids.includes(activeTabId) && idx >= 0) {
@@ -679,10 +754,39 @@ function busyCountOf(tabs: TerminalTab[]): number {
 }
 
 // 关闭的标签页进历史，可从历史找回；只有会打断正在进行的回合时才确认
+// 关闭下一层临时会话：只销毁终端，会话仍在父标签页的会话栈里
+function closeChild(childId: string): void {
+  const parentId = childId.slice(0, childId.indexOf(CHILD_SEP))
+  const list = children.get(parentId) ?? []
+  const child = list.find((x) => x.id === childId)
+  if (!child) return
+  child.dispose()
+  children.set(parentId, list.filter((x) => x !== child))
+  void op({ op: 'clearRunning', tabId: childId })
+  if (activeTabId === childId) {
+    activeTabId = parentId
+    activateUI(parentId)
+  }
+  refreshUI()
+}
+
 export function closeTab(tabId: string): void {
   const ctx = findTab(tabId)
   if (!ctx) return
   const { tab } = ctx
+  if (isChildId(tabId)) {
+    if (busyCountOf([tab]) === 0) {
+      closeChild(tabId)
+      return
+    }
+    confirmDialog({
+      title: t('关闭「{0}」？', tab.name),
+      message: t('该会话正在运行或待决策，关闭会立即中断。'),
+      okLabel: t('关闭'),
+      onOk: () => closeChild(tabId)
+    })
+    return
+  }
   if (busyCountOf([tab]) === 0) {
     void closeTabsNow([tabId])
     return
@@ -826,21 +930,39 @@ function renameGroup(groupId: string): void {
   })
 }
 
-// 在新标签恢复该会话（--resume）；原标签栈记录保留，两处同开同一 sessionId 可能 jsonl 双写，已知边界不拦。
-async function openSessionInNewTab(sessionId: string): Promise<void> {
-  const ctx = activeContext()
-  if (!ctx) return
-  const { group, tab } = ctx
-  const sess = tab.sessions.find((s) => s.sessionId === sessionId)
-  if (!sess) return
-  const name = tabNameForSession(sess, tab)
-  await openNewTab(await createTab(group.id, name, true, [sessionId]))
-  toast(t('已在新标签打开会话「{0}」', name))
+// 该会话此刻在哪个终端里运行（排除 exceptId）
+function runningTabOf(sessionId: string, exceptId?: string): TerminalTab | null {
+  for (const [tabId, sid] of Object.entries(store.running)) {
+    if (sid !== sessionId || tabId === exceptId) continue
+    const c = findTab(tabId)
+    if (c) return c.tab
+  }
+  return null
 }
 
-function tabNameForSession(s: SessionRecord, tab: TerminalTab): string {
-  const raw = sessionTitle(s, tab.sessions, tab.name)
-  return raw.length > 20 ? raw.slice(0, 19) + '…' : raw
+// 已在别处运行就切过去，不开第二份；返回是否已处理
+function focusIfRunning(sessionId: string): boolean {
+  const other = runningTabOf(sessionId)
+  if (!other) return false
+  activateTab(other.id)
+  toast(t('该会话已在「{0}」中运行', other.name))
+  return true
+}
+
+// 在标签页下一层打开会话：父标签页不受影响；已有同会话的子终端就直接切过去
+export async function openSessionNested(parentId: string, sessionId: string): Promise<void> {
+  if (focusIfRunning(sessionId)) return
+  const ctx = findTab(parentId)
+  if (!ctx || isChildId(parentId)) return
+  const existing = (children.get(parentId) ?? []).find((x) => x.activeSessionId === sessionId)
+  if (existing) {
+    activateTab(existing.id)
+    return
+  }
+  const child = mountChild(ctx.group, ctx.tab, sessionId)
+  activeTabId = child.id
+  activateUI(child.id)
+  await spawnTabPty(child)
 }
 
 // ─── 栈内会话右键菜单（重命名 / 删除） ──────
@@ -850,11 +972,15 @@ export function openSessionCtx(sessionId: string, x: number, y: number): void {
   const sess = ctx.tab.sessions.find((s) => s.sessionId === sessionId)
   if (!sess) return
   const onlyOne = ctx.tab.sessions.length <= 1
-  const items: CtxItem[] = [
-    { label: t('在新标签页中打开该会话'), icon: icon('external-link'), act: () => void openSessionInNewTab(sessionId) },
-    { sep: true },
-    { label: t('重命名会话'), icon: icon('edit'), act: () => renameSession(sessionId) }
-  ]
+  const items: CtxItem[] = []
+  // 栈顶会话就是标签页本身，不提供下一层打开
+  if (sessionId !== ctx.tab.activeSessionId) {
+    items.push(
+      { label: t('在标签页下一层打开'), icon: icon('external-link'), act: () => void openSessionNested(ctx.tab.id, sessionId) },
+      { sep: true }
+    )
+  }
+  items.push({ label: t('重命名会话'), icon: icon('edit'), act: () => renameSession(sessionId) })
   if (sess.userTitle) {
     items.push({ label: t('清除自定义标题'), icon: icon('rotate-ccw'), act: () => renameSession(sessionId, '') })
   }
@@ -919,6 +1045,10 @@ export async function switchSession(sessionId: string): Promise<void> {
   if (!ctx) return
   const { tab } = ctx
   if (!tab.sessions.some((s) => s.sessionId === sessionId)) return
+  if (runningTabOf(sessionId, tab.id)) {
+    focusIfRunning(sessionId)
+    return
+  }
   await op({ op: 'setTop', tabId: tab.id, sessionId })
   await tab.restartPty()
   refreshUI()
@@ -1040,31 +1170,23 @@ export function reorderGroups(ids: string[]): void {
 
 // 历史标签页：近 7 天关闭的标签，按关闭时间倒序
 const HISTORY_DAYS = 7
-export function getHistoryEntries(): HistoryEntry[] {
-  const since = Date.now() - HISTORY_DAYS * 86_400_000
-  return store.tabs
-    .filter((x) => x.closedAt && Date.parse(x.closedAt) >= since)
-    .sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? ''))
-    .map((x) => {
-      const g = store.groups.find((y) => y.id === x.groupId)
-      return {
-        tabId: x.id,
-        tabName: x.name,
-        groupName: g?.name ?? '',
-        cwd: g?.cwd ?? '',
-        autoLaunchCC: x.autoLaunchCC,
-        sessions: sessionsOfStack(x.stack),
-        activeSessionId: x.stack[0],
-        memo: x.memo,
-        openedAt: x.openedAt,
-        lastSeenAt: x.closedAt ?? x.lastSeenAt
-      }
-    })
+
+function historyEntryOf(x: TabRec): HistoryEntry {
+  const g = store.groups.find((y) => y.id === x.groupId)
+  return {
+    tabId: x.id,
+    tabName: x.name,
+    groupName: g?.name ?? '',
+    cwd: g?.cwd ?? '',
+    autoLaunchCC: x.autoLaunchCC,
+    sessions: sessionsOfStack(x.stack),
+    activeSessionId: x.stack[0],
+    memo: x.memo,
+    openedAt: x.openedAt,
+    lastSeenAt: x.closedAt ?? x.lastSeenAt
+  }
 }
 
-export async function deleteHistoryEntries(tabIds: string[]): Promise<void> {
-  await op({ op: 'deleteTabs', ids: tabIds })
-}
 
 // 重新打开历史标签页：沿用原 id、原分组与会话栈
 export async function restoreFromHistory(entry: HistoryEntry): Promise<void> {
@@ -1079,6 +1201,147 @@ export async function restoreFromHistory(entry: HistoryEntry): Promise<void> {
   if (!rec || !g) return
   await openNewTab(mountTab(g, rec))
   toast(t('已从历史恢复「{0}」', entry.tabName))
+}
+
+// ── Ctrl+P 全局搜索 ────────────────────────────────────────────────
+
+const QUICK_LIMIT = 50
+
+function groupLabelOf(rec: TabRec): string {
+  return store.groups.find((g) => g.id === rec.groupId)?.name ?? ''
+}
+
+function tabItem(rec: TabRec, hl?: Range[]): QuickItem {
+  return {
+    key: 'tab:' + rec.id,
+    kind: 'tab',
+    title: rec.name,
+    titleHl: hl,
+    sub: groupLabelOf(rec),
+    closedAt: rec.closedAt,
+    act: () => {
+      if (rec.closedAt) {
+        void restoreFromHistory(historyEntryOf(rec))
+      } else {
+        activateTab(rec.id)
+      }
+    }
+  }
+}
+
+/** 未输入关键字时：今天 / 昨天 / 近 7 天关闭的标签页 */
+export function getQuickHistory(): QuickGroup[] {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const yesterday = today - 86_400_000
+  const since = Date.now() - HISTORY_DAYS * 86_400_000
+  const buckets: QuickGroup[] = [
+    { label: t('今天'), items: [] },
+    { label: t('昨天'), items: [] },
+    { label: t('近 7 天'), items: [] }
+  ]
+  const closed = store.tabs
+    .filter((x) => x.closedAt && Date.parse(x.closedAt) >= since)
+    .sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? ''))
+  for (const rec of closed) {
+    const ts = Date.parse(rec.closedAt!)
+    const b = ts >= today ? 0 : ts >= yesterday ? 1 : 2
+    buckets[b].items.push(tabItem(rec))
+  }
+  return buckets.filter((b) => b.items.length > 0)
+}
+
+// 从搜索结果打开会话：在跑就切过去；在打开的标签页里且是栈顶就切到该标签页，否则在下一层打开；
+// 属于历史标签页就重开该标签页并设为主会话
+async function openSessionFromSearch(sessionId: string, rec: TabRec): Promise<void> {
+  if (focusIfRunning(sessionId)) return
+  if (!rec.closedAt) {
+    if (rec.stack[0] === sessionId) {
+      activateTab(rec.id)
+    } else {
+      await openSessionNested(rec.id, sessionId)
+    }
+    return
+  }
+  await op({ op: 'reopenTab', id: rec.id, top: sessionId })
+  const fresh = tabRec(rec.id)
+  const g = fresh ? liveGroup(fresh.groupId) : null
+  if (!fresh || !g) return
+  await openNewTab(mountTab(g, fresh))
+}
+
+/** 输入关键字后：按搜索类别分组列出结果 */
+export function quickSearch(query: string, scopes: Settings['searchScopes']): QuickGroup[] {
+  const q = query.trim()
+  if (!q) return []
+  const out: QuickGroup[] = []
+  const rank = <T,>(list: { v: T; score: number }[]): T[] =>
+    list.sort((a, b) => b.score - a.score).slice(0, QUICK_LIMIT).map((x) => x.v)
+
+  if (scopes.tabTitle) {
+    const hits: { v: QuickItem; score: number }[] = []
+    for (const rec of store.tabs) {
+      const r = fuzzySearch(q, [rec.name])
+      if (r) hits.push({ v: tabItem(rec, r.highlights[0]), score: r.score })
+    }
+    if (hits.length > 0) out.push({ label: t('标签页'), items: rank(hits) })
+  }
+
+  if (scopes.sessionTitle) {
+    const hits: { v: QuickItem; score: number }[] = []
+    const seen = new Set<string>()
+    // 打开的标签页优先认领会话，同一会话只列一次
+    const ordered = [...store.tabs].sort((a, b) => Number(!!a.closedAt) - Number(!!b.closedAt))
+    for (const rec of ordered) {
+      const sessions = sessionsOfStack(rec.stack)
+      for (const sess of sessions) {
+        if (seen.has(sess.sessionId)) continue
+        seen.add(sess.sessionId)
+        const title = sessionTitle(sess, sessions, rec.name)
+        const r = fuzzySearch(q, [title])
+        if (!r) continue
+        hits.push({
+          v: {
+            key: 'sess:' + sess.sessionId,
+            kind: 'session',
+            title,
+            titleHl: r.highlights[0],
+            sub: `${groupLabelOf(rec)} · ${rec.name}`,
+            closedAt: rec.closedAt,
+            act: () => void openSessionFromSearch(sess.sessionId, rec)
+          },
+          score: r.score
+        })
+      }
+    }
+    if (hits.length > 0) out.push({ label: t('会话'), items: rank(hits) })
+  }
+
+  if (scopes.path) {
+    const hits: { v: QuickItem; score: number }[] = []
+    const seen = new Set<string>()
+    for (const g of store.groups) {
+      // 同一目录的正反斜杠、大小写写法只列一次
+      const key = g.cwd.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
+      if (!g.cwd || seen.has(key)) continue
+      seen.add(key)
+      const r = fuzzySearch(q, [g.cwd])
+      if (!r) continue
+      hits.push({
+        v: {
+          key: 'path:' + g.cwd,
+          kind: 'path',
+          title: g.cwd,
+          titleHl: r.highlights[0],
+          sub: g.name,
+          act: () => void openHereWithPath(g.cwd)
+        },
+        score: r.score
+      })
+    }
+    if (hits.length > 0) out.push({ label: t('目录'), items: rank(hits) })
+  }
+  return out
 }
 
 // 标签拖拽（Sidebar/Toolbar 共用）：自定义 MIME 传 tabId，只用于同分组内排序
@@ -1139,10 +1402,10 @@ export async function initApp(): Promise<void> {
 
   // ─── PTY 全局路由 ───────────────────────────────────────────────
   const offData = window.term.onData((id, data) => {
-    for (const g of groups) for (const t of g.tabs) if (t.ptyId === id) return t.writeFromPty(data)
+    for (const t of allTabs()) if (t.ptyId === id) return t.writeFromPty(data)
   })
   const offExit = window.term.onExit((id, exitCode) => {
-    for (const g of groups) for (const t of g.tabs) if (t.ptyId === id) return t.handlePtyExit(exitCode)
+    for (const t of allTabs()) if (t.ptyId === id) return t.handlePtyExit(exitCode)
   })
 
   // ─── store 快照（会话栈由主进程按会话事件维护后推过来） ───────────
@@ -1158,6 +1421,16 @@ export async function initApp(): Promise<void> {
     ctx.tab.ccActive = true
     refreshUI()
     void refreshSessionMeta(ctx.tab)
+    // cc 里 /resume 了一个正在别处运行的会话：事后提醒，不强制关闭
+    const other = runningTabOf(ev.sessionId, ev.tabId)
+    if (other && !isConfirmOpen()) {
+      confirmDialog({
+        title: t('该会话已在「{0}」中运行', other.name),
+        message: t('两处同时运行同一会话会交替写入同一份对话记录。'),
+        okLabel: t('切过去'),
+        onOk: () => activateTab(other.id)
+      })
+    }
   })
 
   // ─── 状态徽标事件 ───────────────────────────────────────────────
@@ -1197,6 +1470,11 @@ export async function initApp(): Promise<void> {
     if (e.key === 'Escape') {
       closeSearchOverlay()
     }
+    // Ctrl+P：全局搜索；终端里 xterm 已放行该键，事件照常冒泡到这里
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'p' || e.key === 'P')) {
+      e.preventDefault()
+      toggleQuickOpen()
+    }
     // Ctrl+F 兜底：终端聚焦时由 TerminalTab 键处理器开搜索，这里补焦点在侧栏等处的情况
     if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'F')) {
       const t = e.target as HTMLElement
@@ -1207,7 +1485,7 @@ export async function initApp(): Promise<void> {
     }
     if (e.ctrlKey && e.key === 'Tab') {
       e.preventDefault()
-      const all = groups.flatMap((g) => g.tabs)
+      const all = allTabs()
       if (all.length < 2) return
       const idx = all.findIndex((t) => t.id === activeTabId)
       const next = e.shiftKey ? all[(idx - 1 + all.length) % all.length] : all[(idx + 1) % all.length]
@@ -1221,12 +1499,12 @@ export async function initApp(): Promise<void> {
     offStore()
     offSession()
     offState()
-    for (const g of groups) for (const t of g.tabs) t.dispose()
+    for (const t of allTabs()) t.dispose()
   })
 
   window.term.onWindowCloseRequest(() => {
     if (isConfirmOpen()) return // 已有确认弹窗在显示，忽略重复触发
-    const busy = busyCountOf(groups.flatMap((g) => g.tabs))
+    const busy = busyCountOf(allTabs())
     confirmDialog({
       title: t('确认关闭 Claude Terminal？'),
       message: busy > 0

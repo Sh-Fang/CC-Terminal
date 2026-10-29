@@ -88,7 +88,7 @@ interface OverlaysState {
   memoEditSeq: number
   memoTip: MemoTipState | null
   settingsOpen: boolean
-  historyOpen: boolean
+  quickOpen: boolean
   searchOpen: boolean
 }
 
@@ -104,7 +104,7 @@ export const useOverlays = create<OverlaysState>(() => ({
   memoEditSeq: 0,
   memoTip: null,
   settingsOpen: false,
-  historyOpen: false,
+  quickOpen: false,
   searchOpen: false
 }))
 
@@ -206,11 +206,14 @@ export function closeSettings(): void {
   useOverlays.setState({ settingsOpen: false })
 }
 
-export function openHistory(): void {
-  useOverlays.setState({ historyOpen: true })
+export function openQuickOpen(): void {
+  useOverlays.setState({ quickOpen: true })
 }
-export function closeHistory(): void {
-  useOverlays.setState({ historyOpen: false })
+export function closeQuickOpen(): void {
+  useOverlays.setState({ quickOpen: false })
+}
+export function toggleQuickOpen(): void {
+  useOverlays.setState((s) => ({ quickOpen: !s.quickOpen }))
 }
 
 export function openSearchOverlay(): void {

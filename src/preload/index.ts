@@ -80,6 +80,7 @@ export interface Settings {
   floaterY: number | null
   tabBarMode: TabBarMode
   language: AppLanguage
+  searchScopes: { tabTitle: boolean; sessionTitle: boolean; path: boolean }
 }
 
 export interface FloaterCounts {

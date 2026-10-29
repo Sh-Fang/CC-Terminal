@@ -13,6 +13,7 @@ import { detectClaudePath } from './claude-helper'
 import { logEvent, startLogging, stopLogging } from './app-log'
 import { setLanguage, t } from './i18n'
 import { setMainWindowGetter } from './windows'
+import { refreshMetaInBackground } from './store'
 
 // 界面语言启动时定死，切换走 app:relaunch 重启生效
 try { setLanguage(loadSettings().language) } catch {}
@@ -367,6 +368,8 @@ app.whenReady().then(() => {
   sessionWatcher.start()
   stateWatcher.start()
   createWindow()
+  // 启动稳定后再在后台补会话标题来源，不和首屏恢复抢 IO
+  setTimeout(() => refreshMetaInBackground(), 5000)
   ensureTray()
   // 按设置决定是否拉起悬浮窗
   try {

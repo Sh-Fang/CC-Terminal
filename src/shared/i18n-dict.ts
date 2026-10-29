@@ -1,6 +1,29 @@
 // 界面多语言词典：中文原文即 key（可含 {0} {1} 占位符），值为 English 译文；缺词条时 t() 回退中文。
 // 主进程与渲染进程共用本文件。
 export const I18N_EN: Record<string, string> = {
+  // 全局搜索 / 下一层会话 / 关闭确认
+  '全局搜索': 'Global search',
+  '搜索': 'Search',
+  '搜索类别': 'Search categories',
+  '标签页标题': 'Tab titles',
+  '会话标题': 'Session titles',
+  '路径': 'Paths',
+  '没有匹配项': 'No matches',
+  '近 7 天没有关闭的标签页': 'No tabs closed in the last 7 days',
+  '近 7 天': 'Last 7 days',
+  '标签页': 'Tabs',
+  '会话': 'Sessions',
+  '目录': 'Folders',
+  '搜索（Ctrl+P）': 'Search (Ctrl+P)',
+  '该会话已在「{0}」中运行': 'This session is already running in "{0}"',
+  '两处同时运行同一会话会交替写入同一份对话记录。': 'Running the same session in two places interleaves writes to one transcript.',
+  '切过去': 'Switch to it',
+  '在标签页下一层打开': 'Open under this tab',
+  '关闭「{0}」？': 'Close "{0}"?',
+  '该会话正在运行或待决策，关闭会立即中断。': 'This session is running or waiting for input. Closing interrupts it.',
+  '该标签正在运行或待决策，关闭会立即中断。': 'This tab is running or waiting for input. Closing interrupts it.',
+  '其中 <b>{0}</b> 个标签正在运行或待决策，关闭会立即中断。': '<b>{0}</b> tab(s) are running or waiting for input. Closing interrupts them.',
+  '打开的标签页下次启动时自动恢复。': 'Open tabs are restored on next launch.',
   // 标题栏 / 窗口
   '窗口控制': 'Window controls',
   '最小化': 'Minimize',

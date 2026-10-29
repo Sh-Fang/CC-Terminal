@@ -45,6 +45,8 @@ export interface Settings {
   floaterY: number | null
   tabBarMode: TabBarMode       // 标签栏布局：vertical = 左栏分组（默认）；horizontal = 顶部平铺
   language: AppLanguage        // 界面语言：zh = 简体中文（默认）；en = English。重启后生效
+  // Ctrl+P 全局搜索的类别开关：标签页标题 / 会话标题 / 路径（工作目录）
+  searchScopes: { tabTitle: boolean; sessionTitle: boolean; path: boolean }
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -72,7 +74,8 @@ export const DEFAULT_SETTINGS: Settings = {
   floaterX: null,
   floaterY: null,
   tabBarMode: 'vertical',
-  language: 'zh'
+  language: 'zh',
+  searchScopes: { tabTitle: true, sessionTitle: true, path: false }
 }
 
 const FILE = (): string => join(app.getPath('userData'), 'settings.json')
@@ -86,6 +89,9 @@ const LANGUAGES: AppLanguage[] = ['zh', 'en']
 
 function pick<T extends string>(v: unknown, allow: T[], fallback: T): T {
   return typeof v === 'string' && (allow as string[]).includes(v) ? (v as T) : fallback
+}
+function bool(v: unknown, fallback: boolean): boolean {
+  return typeof v === 'boolean' ? v : fallback
 }
 function clampNum(v: unknown, min: number, max: number, fallback: number): number {
   const n = typeof v === 'number' ? v : Number(v)
@@ -108,6 +114,7 @@ function normalize(raw: unknown): Settings {
   const cursor = (r.cursor as Record<string, unknown>) || {}
   const term = (r.terminal as Record<string, unknown>) || {}
   const def = (r.defaults as Record<string, unknown>) || {}
+  const scopes = (r.searchScopes as Record<string, unknown>) || {}
   return {
     version: 1,
     font: {
@@ -156,7 +163,12 @@ function normalize(raw: unknown): Settings {
     floaterX: coord(r.floaterX),
     floaterY: coord(r.floaterY),
     tabBarMode: pick(r.tabBarMode, TABBAR_MODES, DEFAULT_SETTINGS.tabBarMode),
-    language: pick(r.language, LANGUAGES, DEFAULT_SETTINGS.language)
+    language: pick(r.language, LANGUAGES, DEFAULT_SETTINGS.language),
+    searchScopes: {
+      tabTitle: bool(scopes.tabTitle, DEFAULT_SETTINGS.searchScopes.tabTitle),
+      sessionTitle: bool(scopes.sessionTitle, DEFAULT_SETTINGS.searchScopes.sessionTitle),
+      path: bool(scopes.path, DEFAULT_SETTINGS.searchScopes.path)
+    }
   }
 }
 

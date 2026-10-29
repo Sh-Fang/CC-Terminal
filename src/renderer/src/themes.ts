@@ -31,6 +31,8 @@ export interface Settings {
   floaterY: number | null
   tabBarMode: TabBarMode       // 标签栏布局：垂直（左栏分组）/ 水平（顶部平铺）
   language: AppLanguage        // 界面语言：zh = 简体中文（默认）；en = English。重启后生效
+  // Ctrl+P 全局搜索的类别开关：标签页标题 / 会话标题 / 路径（工作目录）
+  searchScopes: { tabTitle: boolean; sessionTitle: boolean; path: boolean }
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -58,7 +60,8 @@ export const DEFAULT_SETTINGS: Settings = {
   floaterX: null,
   floaterY: null,
   tabBarMode: 'vertical',
-  language: 'zh'
+  language: 'zh',
+  searchScopes: { tabTitle: true, sessionTitle: true, path: false }
 }
 
 export const THEMES: Record<ThemePreset, ITheme & { label: string; backgroundCss: string }> = {

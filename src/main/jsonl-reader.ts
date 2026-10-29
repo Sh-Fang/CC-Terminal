@@ -89,7 +89,7 @@ export function readSessionMeta(sessionId: string): SessionMeta {
 
 // 第一条真实用户消息的文本：跳过 meta、命令包装、工具结果
 function readFirstPrompt(path: string): string | undefined {
-  const raw = headRead(path, 256 * 1024)
+  const raw = headRead(path, 64 * 1024)
   for (const line of raw.split(/\r?\n/)) {
     const obj = safeParse(line)
     if (!obj || obj.type !== 'user' || obj.isMeta === true || !isRealMessage(obj)) continue

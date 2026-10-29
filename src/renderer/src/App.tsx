@@ -9,7 +9,7 @@ import { SearchBar } from './components/SearchBar'
 import { SessionInfoBar } from './components/SessionInfoBar'
 import { OverlayHost, ToastHost } from './components/OverlayHost'
 import { SettingsPanel } from './components/SettingsPanel'
-import { HistoryDialog } from './components/HistoryDialog'
+import { QuickOpen } from './components/QuickOpen'
 
 export function App() {
   const rev = useAppStore((s) => s.rev)
@@ -46,7 +46,7 @@ export function App() {
       </div>
       <OverlayHost />
       <SettingsPanel />
-      <HistoryDialog />
+      <QuickOpen />
     </>
   )
 }

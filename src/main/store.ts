@@ -154,15 +154,24 @@ function moveToTop(tab: TabRec, sessionId: string): void {
   tab.stack = [sessionId, ...tab.stack.filter((x) => x !== sessionId)]
 }
 
+// 下一层临时会话的终端 id 形如 <标签页 id>__c<序号>；它的会话事件归到父标签页的会话栈
+const CHILD_SEP = '__c'
+
+export function parentTabId(id: string): string {
+  const i = id.indexOf(CHILD_SEP)
+  return i >= 0 ? id.slice(0, i) : id
+}
+
 /** 会话开始：按来历维护会话栈（见 GLOSSARY「主会话」「临时会话」） */
 export function applySessionStart(ev: SessionStartEvent): StoreSnapshot | null {
-  const tab = tabOf(ev.tabId)
+  const isChild = parentTabId(ev.tabId) !== ev.tabId
+  const tab = tabOf(parentTabId(ev.tabId))
   if (!tab) {
     return null
   }
   const prevRunning = running.get(tab.id)
-  // 之前没在跑（刚启动）或跑的就是栈顶 → 视为主会话里的操作
-  const fromTop = prevRunning === undefined || prevRunning === tab.stack[0]
+  // 父标签页里：之前没在跑（刚启动）或跑的就是栈顶 → 视为主会话里的操作；下一层始终是临时会话
+  const fromTop = !isChild && (prevRunning === undefined || prevRunning === tab.stack[0])
   const inStack = tab.stack.includes(ev.sessionId)
   const sess = ensureSession(ev.sessionId, ev.source, ev.ts)
   if (ev.ts && (!sess.lastTs || ev.ts > sess.lastTs)) {
@@ -173,23 +182,55 @@ export function applySessionStart(ev: SessionStartEvent): StoreSnapshot | null {
       tab.stack.push(ev.sessionId)
     }
   } else if (ev.source === 'resume') {
-    // 栈内会话移到栈顶；栈外会话作为临时会话运行，不入栈
-    if (inStack) {
+    // 父标签页里 resume 栈内会话 → 移到栈顶；栈外会话作为临时会话运行，不入栈；下一层不动栈
+    if (inStack && !isChild) {
       moveToTop(tab, ev.sessionId)
     }
-  } else if (ev.source === 'startup') {
-    moveToTop(tab, ev.sessionId)
   } else if (inStack) {
-    // clear / fork 拿到已在栈里的 id：不变
-  } else if (fromTop || tab.stack.length === 0) {
+    // 拿到已在栈里的 id：startup 在父标签页里移到栈顶，其余不变
+    if (ev.source === 'startup' && !isChild) {
+      moveToTop(tab, ev.sessionId)
+    }
+  } else if ((ev.source === 'startup' && !isChild) || fromTop || tab.stack.length === 0) {
     tab.stack.unshift(ev.sessionId)
   } else {
     // 临时会话里开的新会话只入栈，不成为栈顶
     tab.stack.splice(1, 0, ev.sessionId)
   }
-  running.set(tab.id, ev.sessionId)
+  running.set(ev.tabId, ev.sessionId)
   tab.lastSeenAt = nowIso()
   return commit()
+}
+
+// 启动后在后台逐个补齐会话标题来源（首条消息、/rename 标题），避免一次性读大量对话记录卡住
+const META_BATCH = 8
+const metaChecked = new Set<string>()
+
+export function refreshMetaInBackground(): void {
+  const pending = load().sessions.filter((s) => !s.firstPrompt && !s.ccTitle && !metaChecked.has(s.id))
+  if (pending.length === 0) {
+    return
+  }
+  const step = (): void => {
+    const batch = pending.splice(0, META_BATCH)
+    for (const s of batch) {
+      metaChecked.add(s.id)
+      const meta = readSessionMeta(s.id)
+      if (meta.exists) {
+        s.ccTitle = meta.customTitle
+        s.firstPrompt = meta.firstPrompt
+        if (meta.lastTs && (!s.lastTs || meta.lastTs > s.lastTs)) {
+          s.lastTs = meta.lastTs
+        }
+      }
+    }
+    if (pending.length > 0) {
+      setTimeout(step, 30)
+    } else {
+      commit()
+    }
+  }
+  setTimeout(step, 30)
 }
 
 /** 渲染进程发来的写操作 */
@@ -270,21 +311,15 @@ export function applyOp(o: StoreOp): StoreSnapshot {
           t.closedAt = ts
           t.lastSeenAt = ts
         }
-        running.delete(id)
+        for (const k of [...running.keys()]) {
+          if (parentTabId(k) === id) {
+            running.delete(k)
+          }
+        }
       }
       if (d.activeTabId && o.ids.includes(d.activeTabId)) {
         d.activeTabId = null
       }
-      break
-    }
-    case 'deleteTabs': {
-      // 只删历史标签页记录；仍打开的标签页不受影响
-      const gone = new Set(o.ids.filter((id) => tabOf(id)?.closedAt))
-      d.tabs = d.tabs.filter((t) => !gone.has(t.id))
-      for (const g of d.groups) {
-        g.tabIds = g.tabIds.filter((id) => !gone.has(id))
-      }
-      d.groups = d.groups.filter((g) => g.tabIds.length > 0)
       break
     }
     case 'reopenTab': {
@@ -304,6 +339,10 @@ export function applyOp(o: StoreOp): StoreSnapshot {
           moveToTop(t, o.top)
         }
       }
+      break
+    }
+    case 'clearRunning': {
+      running.delete(o.tabId)
       break
     }
     case 'setActiveTab': {

@@ -68,9 +68,9 @@ export type StoreOp =
   | { op: 'setMemo'; id: string; memo: string | null }
   | { op: 'reorderTabs'; groupId: string; ids: string[] }
   | { op: 'closeTabs'; ids: string[] }
-  | { op: 'deleteTabs'; ids: string[] }
   | { op: 'reopenTab'; id: string; top?: string }
   | { op: 'setActiveTab'; id: string | null }
+  | { op: 'clearRunning'; tabId: string }
   | { op: 'setTop'; tabId: string; sessionId: string }
   | { op: 'removeSession'; tabId: string; sessionId: string }
   | { op: 'renameSession'; id: string; title: string | null }
