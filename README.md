@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D4" alt="platform" />
   <img src="https://img.shields.io/github/package-json/v/Sh-Fang/CC-Terminal?label=version&color=orange" alt="version" />
   <img src="https://img.shields.io/badge/Electron-42-47848F?logo=electron&logoColor=white" alt="electron" />
-  <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="license" />
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="license" />
 </p>
 
 <img src="docs/screenshots/hero.png" alt="CC Terminal 主界面" width="880" />
@@ -130,4 +130,4 @@ npm run dist:linux   # Linux：AppImage + tar.gz
 
 ## 许可证
 
-[GPL-3.0](LICENSE) — 可以自由使用和二次开发；分发修改版需要以同样的许可证开源。
+[MIT](LICENSE) — 可以自由使用、修改和分发，包括商用；保留版权声明即可。

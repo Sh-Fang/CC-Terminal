@@ -2,7 +2,7 @@
   "name": "cc-terminal",
   "version": "0.7.31",
   "description": "适配 Claude Code 与 Codex 的多窗口管理终端",
-  "license": "GPL-3.0-only",
+  "license": "MIT",
   "author": "Sh-Fang",
   "repository": {
     "type": "git",
