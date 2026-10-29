@@ -294,12 +294,14 @@ function ConfirmDialog() {
       <div className="modal modal-confirm" data-testid={testId ? `${testId}-dialog` : undefined}>
         <h2 id="cf-title" data-testid={testId ? `${testId}-title` : undefined}>{cf?.title ?? ''}</h2>
         {/* message 是调用方拼好的 HTML，调用方负责转义 */}
-        <div
-          className="cf-body"
-          id="cf-msg"
-          data-testid={testId ? `${testId}-message` : undefined}
-          dangerouslySetInnerHTML={{ __html: cf?.message ?? '' }}
-        />
+        {cf?.message ? (
+          <div
+            className="cf-body"
+            id="cf-msg"
+            data-testid={testId ? `${testId}-message` : undefined}
+            dangerouslySetInnerHTML={{ __html: cf.message }}
+          />
+        ) : null}
         <div className="actions" data-testid={testId ? `${testId}-actions` : undefined}>
           <button
             id="cf-cancel"

@@ -20,7 +20,7 @@ import {
   sessionTitleIn
 } from '../controller'
 import { openSettings, showMemoTip, hideMemoTip } from '../state/overlays'
-import { formatTs, midEllipsis, srcLabel, statusLabel } from '../lib/format'
+import { formatTs, midEllipsis, statusLabel } from '../lib/format'
 import { icon } from '../svg-icons'
 import { t } from '../i18n'
 import type { TerminalTab, SessionRecord, TabStatus } from '../terminal-tab'
@@ -130,7 +130,7 @@ export function Toolbar() {
         {tab &&
           (tab.sessions.length === 0 ? (
             <div style={{ padding: '10px 12px', fontSize: '12px', color: 'var(--mute)' }}>
-              {t('没有会话记录。激活标签后 Claude Code 会自动创建首个会话。')}
+              {t('暂无会话')}
             </div>
           ) : (
             // 倒序展示，栈顶在最上面
@@ -155,26 +155,14 @@ export function Toolbar() {
                   <div className="sess-body">
                     {/* 超长标题保留头尾、中间省略 */}
                     <div className="sess-title">{midEllipsis(sessionTitleIn(tab, s))}</div>
-                    {/* 三栏均分：时间 / 会话ID / 状态（当前 > 来源标注；clear 来源为空） */}
                     <div className="sess-meta">
                       <span>{formatTs(s.lastTs || s.createdAt)}</span>
-                      <span>{s.sessionId.slice(0, 8)}</span>
-                      <span>
-                        {isCurrent ? (
-                          <span className="cur">{t('当前')}</span>
-                        ) : (
-                          <span className="src">{srcLabel(s.source)}</span>
-                        )}
-                      </span>
                     </div>
                   </div>
                 </div>
               )
             })
           ))}
-      </div>
-      <div className="menu-foot">
-        <span>{t('本标签的会话')}</span>
       </div>
     </div>
   )

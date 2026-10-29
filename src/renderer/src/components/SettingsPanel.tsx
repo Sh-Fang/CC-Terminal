@@ -664,11 +664,11 @@ export function SettingsPanel() {
       !cc.installedSet.has(version);
     const msg = isBackup
       ? t(
-          "你现在正用着 <b>v{0}</b>（自定义路径），把它安装到托管一份作为备份？<br>安装期间当前使用不受影响；装完后可通过「启用」在托管副本与自定义路径之间切换。",
+          "你现在正用着 <b>v{0}</b>（自定义路径），把它安装到托管一份作为备份？",
           version
         )
       : t(
-          "即将从 <b>npm 镜像</b> 安装 <b>v{0}</b>。<br>安装过程中会调 npm 下载并解压依赖，可能耗时几十秒。<br>安装中可以点「取消」中止。",
+          "即将从 <b>npm 镜像</b> 安装 <b>v{0}</b>。",
           version
         );
     confirmDialog({
@@ -1592,7 +1592,6 @@ export function SettingsPanel() {
 
               <div className="cvcard">
                 <div className="cvcard-l">
-                  <span className="cvcard-eyebrow">{t("正在使用")}</span>
                   <span className="cvcard-body" id="cc-ver-current-label">
                     {ccCurLabel}
                   </span>
@@ -1673,9 +1672,7 @@ export function SettingsPanel() {
               <div className="cvlist" id="cc-ver-list" role="listbox">
                 {ccTotal === 0 ? (
                   <div className="cvempty">
-                    {cc.loaded
-                      ? t("没有匹配的版本")
-                      : t("点击右上「刷新」从 npm 拉取版本列表")}
+                    {cc.loaded ? t("没有匹配的版本") : null}
                   </div>
                 ) : (
                   ccSlice.map((v) => ccRow(v))

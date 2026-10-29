@@ -324,14 +324,6 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   font-size: 13px; font-weight: 600; letter-spacing: -0.2px; color: var(--ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.path-placeholder {
-  color: var(--mute);
-  font-style: italic;
-}
-.group-path {
-  font-family: var(--mono); font-size: 10px; color: var(--mute);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px;
-}
 .group-count {
   font-family: var(--mono); font-size: 10px; color: var(--mute);
   background: var(--canvas); border: 1px solid var(--hairline);
@@ -507,13 +499,6 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   line-height: 1; flex: 0 0 18px; cursor: pointer;
 }
 .trow-close:hover { background: var(--hairline); color: var(--ink); }
-
-.side-empty {
-  padding: 14px 12px;
-  color: var(--mute);
-  font-size: 12px;
-  text-align: center;
-}
 
 /* ─── Main pane ───────────────────────────────────────────────────── */
 .main {
@@ -711,8 +696,7 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   flex-direction: column;
 }
 .session-menu.open { display: flex; animation: pop 0.14s ease; }
-.session-menu .menu-eyebrow,
-.session-menu .menu-foot { flex: 0 0 auto; }
+.session-menu .menu-eyebrow { flex: 0 0 auto; }
 .session-menu #sessList {
   flex: 1 1 auto;
   min-height: 0;
@@ -758,24 +742,6 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .sess-meta { font-family: var(--mono); font-size: 11px; color: var(--mute); margin-top: 1px; }
-.sess-meta .src { color: var(--cyan-deep); }
-.sess-item.current .sess-meta .cur { color: var(--violet); font-weight: 500; }
-/* 会话菜单：标题一行；第二行 时间 / 会话ID / 状态 三栏均分（左/中/右对齐）填满整行 */
-#sessionMenu .sess-meta { display: grid; grid-template-columns: 1fr 1fr 1fr; }
-#sessionMenu .sess-meta > span:nth-child(2) { text-align: center; }
-#sessionMenu .sess-meta > span:nth-child(3) { text-align: right; }
-
-.menu-foot {
-  border-top: 1px solid var(--hairline);
-  margin-top: 4px; padding: 8px 10px 6px;
-  font-size: 11px; color: var(--mute);
-  display: flex; align-items: center; gap: 6px;
-}
-.menu-foot code {
-  font-family: var(--mono); background: var(--canvas-soft-2);
-  padding: 1px 5px; border-radius: var(--r-xs); color: var(--body);
-}
-.menu-foot .dot { color: var(--mute); display: inline-grid; place-items: center; }
 
 /* Terminal hosts */
 #hosts {
@@ -800,8 +766,7 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   text-align: center;
   padding: 0 24px;
 }
-#hosts-empty .hint { font-size: 14px; color: #888; }
-#hosts-empty .sub { font-size: 12px; color: #5a5a5a; }
+#hosts-empty .btn { pointer-events: auto; }
 #hosts:has(.term-host.active) #hosts-empty { display: none; }
 .term-host {
   position: absolute;
@@ -1836,10 +1801,6 @@ mark.hl {
   background: var(--ink); border-radius: 2px;
 }
 .cvcard-l { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.cvcard-eyebrow {
-  font-size: 10px; color: var(--mute); letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 .cvcard-body {
   font-size: 13px; color: var(--ink);
   display: flex; align-items: baseline; gap: 8px;

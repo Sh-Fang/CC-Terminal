@@ -574,7 +574,6 @@ export async function newGroup(): Promise<void> {
       const tab = await createTab(gid, v.tabName?.trim() || 'A', v.autoLaunchCC === true)
       await openNewTab(tab)
       rememberCwd(cwd)
-      toast(t('已新建分组「{0}」', v.name))
     }
   })
 }
@@ -602,7 +601,6 @@ async function openHereWithPath(rawPath: string): Promise<void> {
   const tab = await createTab(gid, String.fromCharCode(65 + count), settings.defaults.autoLaunchCC)
   await openNewTab(tab)
   rememberCwd(p)
-  toast(t('已在「{0}」新建标签', findGroup(gid)?.name ?? p))
 }
 
 export async function promptNewTabInGroup(groupId: string): Promise<void> {
@@ -753,7 +751,6 @@ function busyCountOf(tabs: TerminalTab[]): number {
   return tabs.filter((x) => x.status === 'busy' || x.status === 'attention').length
 }
 
-// 关闭的标签页进历史，可从历史找回；只有会打断正在进行的回合时才确认
 // 关闭下一层临时会话：只销毁终端，会话仍在父标签页的会话栈里
 function closeChild(childId: string): void {
   const parentId = childId.slice(0, childId.indexOf(CHILD_SEP))
@@ -774,26 +771,19 @@ export function closeTab(tabId: string): void {
   const ctx = findTab(tabId)
   if (!ctx) return
   const { tab } = ctx
+  const busy = busyCountOf([tab]) > 0
   if (isChildId(tabId)) {
-    if (busyCountOf([tab]) === 0) {
-      closeChild(tabId)
-      return
-    }
     confirmDialog({
       title: t('关闭「{0}」？', tab.name),
-      message: t('该会话正在运行或待决策，关闭会立即中断。'),
+      message: busy ? t('该会话正在运行或待决策，关闭会立即中断。') : '',
       okLabel: t('关闭'),
       onOk: () => closeChild(tabId)
     })
     return
   }
-  if (busyCountOf([tab]) === 0) {
-    void closeTabsNow([tabId])
-    return
-  }
   confirmDialog({
     title: t('关闭标签「{0}」？', tab.name),
-    message: t('该标签正在运行或待决策，关闭会立即中断。'),
+    message: busy ? t('该标签正在运行或待决策，关闭会立即中断。') : '',
     okLabel: t('关闭标签'),
     onOk: () => void closeTabsNow([tabId])
   })
@@ -804,19 +794,11 @@ function closeGroup(groupId: string): void {
   if (!g) return
   const ids = g.tabs.map((x) => x.id)
   const busyCount = busyCountOf(g.tabs)
-  const doClose = async (): Promise<void> => {
-    await closeTabsNow(ids)
-    toast(t('已关闭分组「{0}」', g.name))
-  }
-  if (busyCount === 0) {
-    void doClose()
-    return
-  }
   confirmDialog({
     title: t('关闭分组「{0}」？', g.name),
-    message: t('其中 <b>{0}</b> 个标签正在运行或待决策，关闭会立即中断。', busyCount),
+    message: busyCount > 0 ? t('其中 <b>{0}</b> 个标签正在运行或待决策，关闭会立即中断。', busyCount) : '',
     okLabel: t('关闭分组'),
-    onOk: () => void doClose()
+    onOk: () => void closeTabsNow(ids)
   })
 }
 
@@ -866,8 +848,8 @@ export function reloadTab(tabId: string): void {
   confirmDialog({
     title: t('重新加载标签「{0}」？', tab.name),
     message: isCcTab(tab)
-      ? t('当前有正在进行的 Claude 回合，重新加载会<b>中断</b>它。<br/>标签与会话记录保留，之后会用当前会话继续。')
-      : t('当前有正在运行的命令，重新加载会<b>中断</b>它。'),
+      ? t('重新加载会中断正在进行的回合。')
+      : t('重新加载会中断正在运行的命令。'),
     okLabel: t('重新加载'),
     onOk: () => void doReloadTab(tabId)
   })
@@ -925,7 +907,6 @@ function renameGroup(groupId: string): void {
     okLabel: t('保存'),
     onOk: async (v) => {
       await op({ op: 'renameGroup', id: groupId, name: v.name })
-      toast(t('已重命名分组'))
     }
   })
 }
@@ -1001,13 +982,12 @@ function renameSession(sessionId: string, forceText?: string): void {
   // 显式清除分支：右键「清除自定义标题」时跳过 modal
   if (forceText === '') {
     void op({ op: 'renameSession', id: sessionId, title: null })
-    toast(t('已清除自定义标题'))
     return
   }
   openModal({
     kind: 'rename',
     title: t('重命名会话'),
-    sub: t('留空则恢复默认名。'),
+    sub: '',
     name: sess.userTitle ?? '',
     okLabel: t('保存'),
     onOk: (v) => void op({ op: 'renameSession', id: sessionId, title: v.name })
@@ -1025,16 +1005,13 @@ async function deleteSession(sessionId: string): Promise<void> {
   const title = sessionTitle(sess, tab.sessions, tab.name)
   confirmDialog({
     title: t('删除会话「{0}」？', title),
-    message: wasTop
-      ? t('这是当前激活的会话，删除后会切回最近的会话并重启 shell。<br/>会话记录仍保留在磁盘，只是不再显示在这个标签里。')
-      : t('只从这个标签的列表里移除，磁盘上的会话记录不受影响。'),
+    message: t('会话记录仍保留在磁盘。'),
     okLabel: t('删除'),
     onOk: async () => {
       await op({ op: 'removeSession', tabId: tab.id, sessionId })
       if (wasTop) {
         await tab.restartPty()
       }
-      toast(t('已删除会话'))
     }
   })
 }
@@ -1192,7 +1169,6 @@ function historyEntryOf(x: TabRec): HistoryEntry {
 export async function restoreFromHistory(entry: HistoryEntry): Promise<void> {
   if (findTab(entry.tabId)) {
     activateTab(entry.tabId)
-    toast(t('已切到「{0}」', entry.tabName))
     return
   }
   await op({ op: 'reopenTab', id: entry.tabId })
@@ -1200,7 +1176,6 @@ export async function restoreFromHistory(entry: HistoryEntry): Promise<void> {
   const g = rec ? liveGroup(rec.groupId) : null
   if (!rec || !g) return
   await openNewTab(mountTab(g, rec))
-  toast(t('已从历史恢复「{0}」', entry.tabName))
 }
 
 // ── Ctrl+P 全局搜索 ────────────────────────────────────────────────
@@ -1509,7 +1484,7 @@ export async function initApp(): Promise<void> {
       title: t('确认关闭 Claude Terminal？'),
       message: busy > 0
         ? t('其中 <b>{0}</b> 个标签正在运行或待决策，关闭会立即中断。', busy)
-        : t('打开的标签页下次启动时自动恢复。'),
+        : '',
       okLabel: t('关闭'),
       onOk: () => window.term.winConfirmClose()
     })

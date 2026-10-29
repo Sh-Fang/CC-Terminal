@@ -184,8 +184,7 @@ export function Sidebar() {
   const renderTabRow = (tab: TerminalTab, active: boolean, groupId: string) => {
     const st = (tab.status ?? 'idle') as TabStatus
     const isIdle = st === 'idle'
-    const badgeText = isIdle ? t('{0}会话', tab.sessions.length) : statusShort(st)
-    const badgeCls = isIdle ? '' : ` bs-${st}`
+    const badgeCls = ` bs-${st}`
     const dotTitle = tab.note ? t('{0}：{1}', statusLabel(st), tab.note) : statusLabel(st)
     const renaming = renamingTab === tab.id
     return (
@@ -308,7 +307,7 @@ export function Sidebar() {
             {tab.name}
           </span>
         )}
-        <span className={'trow-badge' + badgeCls}>{badgeText}</span>
+        {!isIdle && <span className={'trow-badge' + badgeCls}>{statusShort(st)}</span>}
         <span className="trow-actions">
           <span
             className="trow-close"
@@ -391,10 +390,7 @@ export function Sidebar() {
           />
           <span className="group-folder" dangerouslySetInnerHTML={{ __html: icon('folder') }} />
           <div className="group-meta">
-            <div className="group-name">{g.name}</div>
-            <div className="group-path" title={cwdTitle}>
-              {g.cwd ? g.cwd : <span className="path-placeholder">{t('(默认目录)')}</span>}
-            </div>
+            <div className="group-name" title={cwdTitle}>{g.name}</div>
           </div>
           {gs !== 'idle' && (
             <span
@@ -442,7 +438,6 @@ export function Sidebar() {
       <aside className={'sidebar' + (settings.sidebarCollapsed ? ' collapsed' : '')} id="sidebar" ref={sidebarRef}>
         <section className="side-section side-open">
           <div className="side-section-label">
-            {t('工作区')}
             <span className="line"></span>
             <button
               id="newGroupBtn"
@@ -558,11 +553,7 @@ export function Sidebar() {
           </div>
           <div className="side-open-scroll">
             <div id="groupList">
-              {groups.length === 0 ? (
-                <div className="side-empty">{t('工作区为空')}</div>
-              ) : (
-                groups.map((g) => renderGroup(g))
-              )}
+              {groups.map((g) => renderGroup(g))}
             </div>
           </div>
         </section>

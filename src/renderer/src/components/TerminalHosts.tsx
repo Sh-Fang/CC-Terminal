@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useAppStore } from '../state/store'
-import { getSettings, setHostsEl, refitActive } from '../controller'
+import { getSettings, setHostsEl, refitActive, newGroup } from '../controller'
 import { backgroundFor } from '../themes'
 import { t } from '../i18n'
 
@@ -49,8 +49,14 @@ export function TerminalHosts() {
           <polyline points="6.5 9 10 12 6.5 15" />
           <line x1="12.5" y1="15" x2="17.5" y2="15" />
         </svg>
-        <div className="hint">{t('没有打开的会话')}</div>
-        <div className="sub">{t('左侧点「新建分组」开始，或从「分组」区恢复')}</div>
+        <button
+          type="button"
+          className="btn btn-primary"
+          data-testid="hosts-empty-new-group"
+          onClick={() => void newGroup()}
+        >
+          {t('新建分组')}
+        </button>
       </div>
     </div>
   )

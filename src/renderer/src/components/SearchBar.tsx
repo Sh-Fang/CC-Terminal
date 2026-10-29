@@ -95,7 +95,7 @@ export function SearchBar() {
         id="search-input"
         ref={inputRef}
         type="text"
-        placeholder={t('搜索（Enter 下一个，Shift+Enter 上一个）')}
+        placeholder={t('搜索')}
         autoComplete="off"
         spellCheck={false}
         onInput={() => runSearch('next')}
