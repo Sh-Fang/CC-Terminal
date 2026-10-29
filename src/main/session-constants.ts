@@ -1,9 +1,11 @@
 // 会话来源 / 标签状态的合法取值。主进程多处校验共用，避免各文件各写一份导致漂移。
 
-export type SessionSource = 'startup' | 'clear' | 'compact' | 'resume'
+import type { SessionSource } from '../shared/store-types'
+
+export type { SessionSource }
 export type TabStatus = 'busy' | 'attention' | 'done' | 'idle' | 'error'
 
-export const SESSION_SOURCES: readonly SessionSource[] = ['startup', 'clear', 'compact', 'resume']
+export const SESSION_SOURCES: readonly SessionSource[] = ['startup', 'clear', 'compact', 'resume', 'fork']
 export const TAB_STATES: readonly TabStatus[] = ['busy', 'attention', 'done', 'idle', 'error']
 
 const SOURCE_SET = new Set<string>(SESSION_SOURCES)

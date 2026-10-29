@@ -6,6 +6,7 @@ import type {
   SaveClaudeAccountInput
 } from '../shared/claude-accounts'
 import type { UpdateActionResult, UpdateCheckResult, UpdateEvent } from '../shared/update'
+import type { SessionSource, StoreOp, StoreSnapshot } from '../shared/store-types'
 
 export type {
   ClaudeAccountDetail,
@@ -14,70 +15,13 @@ export type {
   SaveClaudeAccountInput,
   UpdateActionResult,
   UpdateCheckResult,
-  UpdateEvent
+  UpdateEvent,
+  SessionSource,
+  StoreOp,
+  StoreSnapshot
 }
 
-export type SessionSource = 'startup' | 'clear' | 'compact' | 'resume'
 export type TabStatus = 'busy' | 'attention' | 'done' | 'idle' | 'error'
-
-export interface SessionRecord {
-  sessionId: string
-  source: SessionSource
-  createdAt: string
-  userTitle?: string  // 用户手动重命名；空则显示默认名「会话 N」
-  lastTs?: string
-}
-
-export interface TabRecord {
-  id: string
-  name: string
-  sessions: SessionRecord[]
-  activeSessionId?: string
-  autoLaunchCC?: boolean
-  status?: TabStatus
-  note?: string
-  memo?: string
-}
-
-export interface GroupRecord {
-  id: string
-  name: string
-  cwd: string
-  collapsed?: boolean
-  tabs: TabRecord[]
-}
-
-export interface SavedGroupRecord {
-  id: string
-  name: string
-  cwd: string
-  savedAt: string
-  lastRestoredAt?: string
-  tabCount: number
-  snapshot: GroupRecord
-  srcId?: string
-}
-
-export interface SavedWorkspaceRecord {
-  id: string
-  name: string
-  savedAt: string
-  lastRestoredAt?: string
-  groupCount: number
-  tabCount: number
-  snapshot: {
-    groups: GroupRecord[]
-    activeTabId: string | null
-  }
-}
-
-export interface Workspace {
-  version: 2
-  groups: GroupRecord[]
-  savedGroups: SavedGroupRecord[]
-  savedWorkspaces: SavedWorkspaceRecord[]
-  activeTabId: string | null
-}
 
 export interface SessionEvent {
   tabId: string
@@ -129,8 +73,6 @@ export interface Settings {
   lastUsedCwd: string
   sidebarWidth: number
   sidebarCollapsed: boolean
-  savedCollapsed: boolean
-  sidebarSavedHeight: number
   statusDowngradeSec: number
   closeBehavior: CloseBehavior
   showFloater: boolean
@@ -176,19 +118,6 @@ export interface CcRemoteResult {
   versions: string[]
   error?: string
 }
-export interface HistoryEntry {
-  tabId: string
-  tabName: string
-  groupName: string
-  cwd: string
-  autoLaunchCC: boolean
-  sessions: SessionRecord[]
-  activeSessionId?: string
-  memo?: string
-  openedAt: string
-  lastSeenAt: string
-}
-
 export interface TermBridge {
   platform: NodeJS.Platform  // 'win32' | 'darwin' | ...：渲染层据此切换 shell 引号/窗口按钮
   create(opts: { cols: number; rows: number; cwd?: string; tabId?: string; tabName?: string; freshEnv?: boolean }): Promise<number>
@@ -199,8 +128,9 @@ export interface TermBridge {
   killWait(id: number): Promise<boolean>
   openExternal(url: string): Promise<boolean>
   openPath(path: string): Promise<{ ok: boolean; error?: string }>
-  loadWorkspace(): Promise<Workspace>
-  saveWorkspace(ws: Workspace): Promise<boolean>
+  storeLoad(): Promise<StoreSnapshot>
+  storeOp(o: StoreOp): Promise<StoreSnapshot>
+  onStoreChanged(cb: (s: StoreSnapshot) => void): () => void
   claudeAvailable(): Promise<boolean>
   claudeSessionExists(sessionId: string): Promise<boolean>
   claudeSessionMeta(sessionId: string): Promise<SessionMeta>
@@ -247,12 +177,6 @@ export interface TermBridge {
   onExit(cb: (id: number, exitCode: number) => void): () => void
   onSessionEvent(cb: (e: SessionEvent) => void): () => void
   onStateEvent(cb: (e: StateEvent) => void): () => void
-  tabHistoryList(): Promise<HistoryEntry[]>
-  tabHistoryUpsert(entry: HistoryEntry): Promise<boolean>
-  tabHistoryUpsertMany(entries: HistoryEntry[]): Promise<boolean>
-  tabHistoryDelete(tabId: string): Promise<boolean>
-  tabHistoryDeleteMany(tabIds: string[]): Promise<boolean>
-  tabHistoryClear(): Promise<boolean>
   // 悬浮窗
   floaterSetEnabled(on: boolean): void
   floaterPush(counts: FloaterCounts): void
@@ -281,8 +205,13 @@ const api: TermBridge = {
   killWait: (id) => ipcRenderer.invoke('pty:killWait', { id }),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   openPath: (path) => ipcRenderer.invoke('shell:openPath', path),
-  loadWorkspace: () => ipcRenderer.invoke('workspace:load'),
-  saveWorkspace: (ws) => ipcRenderer.invoke('workspace:save', ws),
+  storeLoad: () => ipcRenderer.invoke('store:load'),
+  storeOp: (o) => ipcRenderer.invoke('store:op', o),
+  onStoreChanged: (cb) => {
+    const h = (_e: IpcRendererEvent, snap: StoreSnapshot) => cb(snap)
+    ipcRenderer.on('store:changed', h)
+    return () => ipcRenderer.off('store:changed', h)
+  },
   claudeAvailable: () => ipcRenderer.invoke('claude:available'),
   claudeSessionExists: (sessionId) => ipcRenderer.invoke('claude:sessionExists', sessionId),
   claudeSessionMeta: (sessionId) => ipcRenderer.invoke('claude:sessionMeta', sessionId),
@@ -360,12 +289,6 @@ const api: TermBridge = {
     ipcRenderer.on('state:event', h)
     return () => ipcRenderer.off('state:event', h)
   },
-  tabHistoryList: () => ipcRenderer.invoke('tabHistory:list'),
-  tabHistoryUpsert: (entry) => ipcRenderer.invoke('tabHistory:upsert', entry),
-  tabHistoryUpsertMany: (entries) => ipcRenderer.invoke('tabHistory:upsertMany', entries),
-  tabHistoryDelete: (tabId) => ipcRenderer.invoke('tabHistory:delete', tabId),
-  tabHistoryDeleteMany: (tabIds) => ipcRenderer.invoke('tabHistory:deleteMany', tabIds),
-  tabHistoryClear: () => ipcRenderer.invoke('tabHistory:clear'),
   floaterSetEnabled: (on) => ipcRenderer.send('floater:setEnabled', !!on),
   floaterPush: (counts) => ipcRenderer.send('floater:push', counts),
   onFloaterCounts: (cb) => {

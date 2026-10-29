@@ -48,55 +48,6 @@ export interface UpdateProgressState {
   percent: number
 }
 
-// 会话选择浮层条目（勾选恢复弹窗 / 管理页共用）
-export interface SessPickEntry {
-  sessionId: string
-  title: string
-  source: string
-  ts?: string
-  isDefault: boolean // 该标签默认活跃会话（不选就是它）
-}
-
-// 选择对话框（如：从已保存分组里选要恢复的标签）
-export interface PickItem {
-  id: string
-  label: string
-  meta?: string
-  disabled?: boolean
-  defaultChecked?: boolean
-  // 该行渲染文本输入框替代静态 label；非空时自动勾选，onOk 的 inputs[id] 拿到值
-  inputPlaceholder?: string
-  // 行尾小垃圾桶：调用方自己负责二次确认 + 重新 openPickTabs 刷新列表
-  onDelete?: () => void
-  deleteTitle?: string
-  // 行内附加小复选框（如"启动 CC"），onOk 的 toggles[id] 拿到勾选态
-  sideToggle?: { defaultChecked: boolean; label: string; title?: string }
-  // 会话级恢复：meta 渲染成可点徽标，点开会话小列表；选中/清除经 onPick 告知调用方
-  //（sessionId 或 null），调用方维护 override 映射。entries≤1 时不可点。
-  sessionPick?: {
-    entries: SessPickEntry[]
-    onPick: (sessionId: string | null) => void
-  }
-}
-export interface PickTabsCfg {
-  title: string
-  sub?: string
-  items: PickItem[]
-  okLabel?: string
-  onOk: (selectedIds: string[], inputs: Record<string, string>, toggles: Record<string, boolean>) => void
-  onCancel?: () => void
-}
-export type PickOpts = PickTabsCfg
-
-// 会话选择浮层（点「N 会话」徽标弹出的小列表）参数
-export interface SessionPickerOpts {
-  anchor: HTMLElement
-  entries: SessPickEntry[]
-  selectedId?: string
-  onPick: (sessionId: string) => void
-  title?: string
-}
-
 // 标签备注编辑弹窗：无标题无按钮的圆角便签，点外部/Esc 关闭时把最终文本交回 onSave
 export interface MemoEditorOpts {
   x: number
@@ -111,8 +62,6 @@ export interface MemoTipState {
   x: number
   y: number
 }
-
-export type SavedManagerView = 'groups' | 'workspaces'
 
 interface CtxState {
   items: CtxItem[]
@@ -135,15 +84,10 @@ interface OverlaysState {
   // toast 隐藏时保留 msg，淡出过程中文字不消失
   toastMsg: string
   toastShow: boolean
-  pick: PickOpts | null
-  pickSeq: number
-  sessPick: SessionPickerOpts | null
   memoEdit: MemoEditorOpts | null
   memoEditSeq: number
   memoTip: MemoTipState | null
   settingsOpen: boolean
-  savedManagerOpen: boolean
-  savedManagerView: SavedManagerView | null // 打开时切到的视图；null = 保持当前视图
   historyOpen: boolean
   searchOpen: boolean
 }
@@ -156,15 +100,10 @@ export const useOverlays = create<OverlaysState>(() => ({
   ctx: null,
   toastMsg: '',
   toastShow: false,
-  pick: null,
-  pickSeq: 0,
-  sessPick: null,
   memoEdit: null,
   memoEditSeq: 0,
   memoTip: null,
   settingsOpen: false,
-  savedManagerOpen: false,
-  savedManagerView: null,
   historyOpen: false,
   searchOpen: false
 }))
@@ -243,22 +182,6 @@ export function closeModal(): void {
   useOverlays.setState({ modal: null })
 }
 
-export function openPickTabs(cfg: PickOpts): void {
-  // 重复调用 = 就地刷新，seq 自增让内部勾选态重置
-  useOverlays.setState((s) => ({ pick: cfg, pickSeq: s.pickSeq + 1 }))
-}
-export function closePickTabs(): void {
-  // 连带关掉可能开着的会话选择浮层
-  useOverlays.setState({ pick: null, sessPick: null })
-}
-
-export function openSessionPicker(opts: SessionPickerOpts): void {
-  useOverlays.setState({ sessPick: opts })
-}
-export function closeSessionPicker(): void {
-  useOverlays.setState({ sessPick: null })
-}
-
 export function openMemoEditor(opts: MemoEditorOpts): void {
   // 覆盖式打开：编辑器组件卸载时会先把旧文本交回旧 onSave，不丢输入
   useOverlays.setState((s) => ({ memoEdit: opts, memoEditSeq: s.memoEditSeq + 1, memoTip: null }))
@@ -281,13 +204,6 @@ export function openSettings(): void {
 }
 export function closeSettings(): void {
   useOverlays.setState({ settingsOpen: false })
-}
-
-export function openSavedManager(view?: SavedManagerView): void {
-  useOverlays.setState({ savedManagerOpen: true, savedManagerView: view ?? null })
-}
-export function closeSavedManager(): void {
-  useOverlays.setState({ savedManagerOpen: false, savedManagerView: null })
 }
 
 export function openHistory(): void {

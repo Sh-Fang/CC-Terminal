@@ -1,54 +1,28 @@
-// controller.ts —— 业务核心。状态是"就地可变 + 显式刷新"：改动后调 refreshUI()（store bump + 悬浮窗计数推送），
-// 订阅 rev 的组件重拉 getter 数据；弹窗/菜单/toast 走 state/overlays 命令式 API。
+// controller.ts —— 业务核心。分组 / 标签页 / 会话栈的持久数据由主进程 store 持有（见 docs/adr/0001），
+// 这里只保留一份只读镜像：写操作一律发 storeOp，主进程推回快照后 applySnapshot 同步到运行中的标签。
+// 进程态（PTY、状态点、cc 是否活跃）只在渲染层；改动后调 refreshUI() 触发订阅 rev 的组件重渲染。
 import { TerminalTab, type SessionRecord } from './terminal-tab'
 import { DEFAULT_SETTINGS, type Settings } from './themes'
+import { defaultSessionTitle } from './lib/format'
 import {
-  defaultSessionTitle,
-  escapeHtml,
-  formatTs,
-  naturalNameCompare,
-  recencyDesc,
-  sessionTitle,
-  shortPath
-} from './lib/format'
-import {
-  closePickTabs,
   confirmDialog,
   isConfirmOpen,
   openMemoEditor,
   openModal,
-  openPickTabs,
   openSearchOverlay,
   closeSearchOverlay,
   closeSearchOverlayIfOpen,
   showCtxMenu,
   toast,
-  type CtxItem,
-  type PickItem
+  type CtxItem
 } from './state/overlays'
 import { icon } from './svg-icons'
 import { setLanguage, t } from './i18n'
 import { bump } from './state/store'
-import type {
-  GroupView,
-  SavedView,
-  SavedWorkspaceView,
-  ManageGroupView,
-  ManageWorkspaceView,
-  HistoryEntry
-} from './app-types'
+import type { GroupView, HistoryEntry } from './app-types'
+import type { StoreOp, StoreSnapshot, TabRec } from '../../shared/store-types'
 
-export type {
-  GroupView,
-  SavedView,
-  SavedWorkspaceView,
-  ManageGroupView,
-  ManageWorkspaceView,
-  ManageTabView,
-  ManageSessionView,
-  ManageWorkspaceGroupView,
-  HistoryEntry
-} from './app-types'
+export type { GroupView, HistoryEntry } from './app-types'
 
 // hosts 元素：xterm 命令式挂载的宿主容器。initApp 开头 await hostsReady，保证恢复标签时 hostsEl 可用。
 let hostsEl: HTMLDivElement | null = null
@@ -78,72 +52,10 @@ export function isCcTab(t: TerminalTab): boolean {
   return t.autoLaunchCC || t.sessions.length > 0
 }
 
-function isPureNonCcGroup(g: Group): boolean {
-  return g.tabs.length > 0 && g.tabs.every((t) => !isCcTab(t))
-}
-
-function isTabExpendable(t: TerminalTab): boolean {
-  return !isCcTab(t)
-}
-
-// 分组是否"脏"：有承载 cc 的脏标签、元信息与已保存不一致、或无保存条目。纯 pwsh 分组永远不脏。
-function isGroupDirty(g: Group): boolean {
-  if (isPureNonCcGroup(g)) return false
-  // 用 isCcTab 而非 autoLaunchCC：cct 手动起的会话也要能让分组显 dirty
-  if (g.tabs.some((t) => t.dirty && isCcTab(t))) return true
-  const saved = savedGroups.find((s) => s.srcId === g.id)
-  if (!saved) return true
-  if (saved.snapshot.name !== g.name) return true
-  if (saved.snapshot.cwd !== g.cwd) return true
-  return false
-}
-
-interface SavedTab {
-  id: string
-  name: string
-  sessions: SessionRecord[]
-  activeSessionId?: string
-  autoLaunchCC: boolean
-  memo?: string
-  savedAt: string
-}
-interface SavedGroup {
-  id: string
-  name: string
-  cwd: string
-  savedAt: string
-  lastRestoredAt?: string
-  snapshot: {
-    name: string
-    cwd: string
-    tabs: SavedTab[]
-  }
-  srcId?: string
-}
-
-interface SavedWorkspaceSnapshotTab extends SavedTab {}
-interface SavedWorkspaceSnapshotGroup {
-  id: string
-  name: string
-  cwd: string
-  tabs: SavedWorkspaceSnapshotTab[]
-}
-interface SavedWorkspace {
-  id: string
-  name: string
-  savedAt: string
-  lastRestoredAt?: string
-  snapshot: {
-    groups: SavedWorkspaceSnapshotGroup[]
-    activeTabId: string | null
-  }
-}
-
+// 运行中的分组（至少有一个打开的标签页）；顺序与 store.groups 一致
 const groups: Group[] = []
-const savedGroups: SavedGroup[] = []
-const savedWorkspaces: SavedWorkspace[] = []
+let store: StoreSnapshot = { version: 1, groups: [], tabs: [], sessions: [], activeTabId: null, running: {} }
 let activeTabId: string | null = null
-let saveDebounceTimer: number | null = null
 let settings: Settings = DEFAULT_SETTINGS
 let settingsSaveTimer: number | null = null
 
@@ -280,108 +192,58 @@ export function getSessionInfoCtx(): { sessionId: string | null; cwd: string; pt
   return { sessionId: ctx.tab.activeSessionId ?? null, cwd: ctx.group.cwd, ptyId: ctx.tab.ptyId, tabId: ctx.tab.id }
 }
 
-// 轻量持久化：只写已保存条目，当前打开的分组不落盘，随窗口关闭即销毁。
-function scheduleSave(): void {
-  if (saveDebounceTimer != null) window.clearTimeout(saveDebounceTimer)
-  saveDebounceTimer = window.setTimeout(() => {
-    saveDebounceTimer = null
-    void window.term.saveWorkspace({
-      version: 2,
-      groups: [],
-      savedGroups: savedGroups.map((s) => ({
-        id: s.id,
-        name: s.name,
-        cwd: s.cwd,
-        savedAt: s.savedAt,
-        lastRestoredAt: s.lastRestoredAt,
-        tabCount: s.snapshot.tabs.length,
-        srcId: s.srcId,
-        snapshot: {
-          id: s.srcId || s.id,
-          name: s.snapshot.name,
-          cwd: s.snapshot.cwd,
-          collapsed: false,
-          tabs: s.snapshot.tabs.map((t) => ({
-            id: t.id,
-            name: t.name,
-            sessions: t.sessions,
-            activeSessionId: t.activeSessionId,
-            autoLaunchCC: t.autoLaunchCC,
-            memo: t.memo
-          }))
-        }
-      })),
-      savedWorkspaces: savedWorkspaces.map((w) => ({
-        id: w.id,
-        name: w.name,
-        savedAt: w.savedAt,
-        lastRestoredAt: w.lastRestoredAt,
-        groupCount: w.snapshot.groups.length,
-        tabCount: w.snapshot.groups.reduce((n, g) => n + g.tabs.length, 0),
-        snapshot: {
-          groups: w.snapshot.groups.map((g) => ({
-            id: g.id,
-            name: g.name,
-            cwd: g.cwd,
-            collapsed: false,
-            tabs: g.tabs.map((t) => ({
-              id: t.id,
-              name: t.name,
-              sessions: t.sessions,
-              activeSessionId: t.activeSessionId,
-              autoLaunchCC: t.autoLaunchCC,
-              memo: t.memo
-            }))
-          })),
-          activeTabId: w.snapshot.activeTabId
-        }
-      })),
-      activeTabId
+// ── store 镜像 ────────────────────────────────────────────────────
+
+// 会话栈（栈顶在前）→ 标签上沿用的 sessions 数组（末尾为栈顶）
+function sessionsOfStack(stack: string[]): SessionRecord[] {
+  const out: SessionRecord[] = []
+  for (const id of [...stack].reverse()) {
+    const s = store.sessions.find((x) => x.id === id)
+    out.push({
+      sessionId: id,
+      source: s?.source ?? 'startup',
+      createdAt: s?.createdAt ?? new Date().toISOString(),
+      userTitle: s?.userTitle,
+      lastTs: s?.lastTs
     })
-  }, 300)
+  }
+  return out
 }
 
-// 标签历史：打开/激活/会话栈变化时写入（崩溃后找回）；同 tab 1.5s 节流，关键时机 force=true 立刻落。
-const historyFlushAt = new Map<string, number>()
-// 恢复合批：restore 期间每个 makeTab 都强刷一次历史（N 次主进程同步写盘），改为攒进
-// Map（同 tab 留最新）在恢复收尾一次批量 upsert。null = 不在恢复中，走常规单条写。
-let historyBatch: Map<string, HistoryEntry> | null = null
-function beginHistoryBatch(): void {
-  if (!historyBatch) historyBatch = new Map()
-}
-function flushHistoryBatch(): void {
-  const batch = historyBatch
-  historyBatch = null
-  if (!batch || batch.size === 0) return
-  void window.term.tabHistoryUpsertMany([...batch.values()])
+function tabRec(id: string): TabRec | undefined {
+  return store.tabs.find((t) => t.id === id)
 }
 
-function recordTabHistory(tab: TerminalTab, groupName: string, force = false): void {
-  const now = Date.now()
-  const last = historyFlushAt.get(tab.id) ?? 0
-  if (!force && now - last < 1500) return
-  historyFlushAt.set(tab.id, now)
-  const entry: HistoryEntry = {
-    tabId: tab.id,
-    tabName: tab.name,
-    groupName,
-    cwd: tab.cwd,
-    autoLaunchCC: tab.autoLaunchCC,
-    sessions: tab.sessions.map((s) => ({ ...s })),
-    activeSessionId: tab.activeSessionId,
-    memo: tab.memo,
-    openedAt: new Date(now).toISOString(),
-    lastSeenAt: new Date(now).toISOString()
+// 主进程快照 → 运行中的分组/标签：名称、折叠、顺序、备注、会话栈全部以快照为准
+function applySnapshot(snap: StoreSnapshot): void {
+  store = snap
+  for (const g of groups) {
+    const rec = snap.groups.find((x) => x.id === g.id)
+    if (!rec) continue
+    g.name = rec.name
+    g.collapsed = rec.collapsed
+    g.tabs.sort((a, b) => rec.tabIds.indexOf(a.id) - rec.tabIds.indexOf(b.id))
+    for (const tab of g.tabs) {
+      const tr = tabRec(tab.id)
+      if (!tr) continue
+      tab.name = tr.name
+      tab.memo = tr.memo
+      tab.autoLaunchCC = tr.autoLaunchCC
+      tab.sessions = sessionsOfStack(tr.stack)
+      tab.activeSessionId = tr.stack[0]
+    }
   }
-  if (historyBatch) {
-    historyBatch.set(tab.id, entry)
-    return
-  }
-  void window.term.tabHistoryUpsert(entry)
+  const order = snap.groups.map((x) => x.id)
+  groups.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
+  refreshUI()
+}
+
+async function op(o: StoreOp): Promise<void> {
+  applySnapshot(await window.term.storeOp(o))
 }
 
 // ── cc 启动并发闸门 ──────────────────────────────────────────────
-// 恢复工作区/分组会在一瞬间为每个标签触发 launchCC，十几个 claude(node) 同时冷启动
+// 恢复多个标签会在一瞬间为每个标签触发 launchCC，十几个 claude(node) 同时冷启动
 // 会打满磁盘 IO + Defender 扫描，整机卡顿（CPU/内存都不高）。闸门限制同时启动数
 //（每轮突发随机 2 或 3），其余排队；占位在该 tab 的 SessionStart hook 到达（cc 已
 // 起来）或 500~1000ms 随机兜底超时后释放，先到先释放。
@@ -452,19 +314,21 @@ async function launchCC(tab: TerminalTab): Promise<void> {
   const settingsArg = await hookSettingsArg()
   // 每次起 cc 都现读设置：改完开关再「重新加载标签」，新进程就按新模式起（不必重开 app）
   const dangerArg = settings.dangerousSkipPermissions ? ' --dangerously-skip-permissions' : ''
-  const active = tab.activeSessionId
+  // 主会话（栈顶）还在就续上；对话记录已不在则从栈里移除，新开会话（hook 上报后成为栈顶）
+  const top = tab.activeSessionId
   let cmd: string
-  if (active && UUID_RE.test(active) && (await window.term.claudeSessionExists(active))) {
-    cmd = `${invoker}${claudeCmd} --resume ${active}${dangerArg}${settingsArg}`
+  if (top && UUID_RE.test(top) && (await window.term.claudeSessionExists(top))) {
+    cmd = `${invoker}${claudeCmd} --resume ${top}${dangerArg}${settingsArg}`
   } else {
-    // 幽灵会话清理：旧 UUID 对应的 jsonl 已不在，从栈里移除
-    if (active && UUID_RE.test(active)) {
-      tab.sessions = tab.sessions.filter((s) => s.sessionId !== active)
+    if (top) {
+      await op({ op: 'removeSession', tabId: tab.id, sessionId: top })
     }
     const newId = crypto.randomUUID()
-    tab.activeSessionId = newId
-    scheduleSave()
     cmd = `${invoker}${claudeCmd} --session-id ${newId} --name ${quoteShell(tab.name)}${dangerArg}${settingsArg}`
+  }
+  if (tab.ptyId == null) {
+    ccGateRelease(tab.id)
+    return
   }
   window.term.send(tab.ptyId, cmd + '\r')
 }
@@ -480,33 +344,19 @@ export function startCcInActiveTab(): void {
   tab.term.focus()
 }
 
-function makeTab(group: Group, opts: {
-  id?: string
-  name: string
-  sessions?: SessionRecord[]
-  activeSessionId?: string
-  autoLaunchCC?: boolean
-  status?: TerminalTab['status']
-  note?: string
-  memo?: string
-  dirty?: boolean
-  // 跨窗口迁移：迁移前 cc 是否活跃（普通新建/恢复不传，默认 false）
-  ccActive?: boolean
-}): TerminalTab {
-  const id = opts.id || uid('t_')
+// 为一条已在 store 里的标签页记录建运行中的标签（xterm + 回调），不起 PTY
+function mountTab(group: Group, rec: TabRec): TerminalTab {
+  const id = rec.id
   let tabRef!: TerminalTab
   tabRef = new TerminalTab(
     {
       id,
-      name: opts.name,
+      name: rec.name,
       cwd: group.cwd,
-      sessions: opts.sessions,
-      activeSessionId: opts.activeSessionId,
-      autoLaunchCC: opts.autoLaunchCC,
-      status: opts.status,
-      note: opts.note,
-      memo: opts.memo,
-      dirty: opts.dirty,
+      sessions: sessionsOfStack(rec.stack),
+      activeSessionId: rec.stack[0],
+      autoLaunchCC: rec.autoLaunchCC,
+      memo: rec.memo,
       settings
     },
     {
@@ -521,7 +371,6 @@ function makeTab(group: Group, opts: {
       },
       onRequestNewTab: () => promptNewTabInGroup(group.id),
       onRequestCloseSelf: () => closeTab(id),
-      onRequestSaveGroup: saveActiveDirtyGroup,
       onPtyStarted: () => void launchCC(tabRef),
       onUserAbort: () => {
         if (tabRef.status !== 'busy') return
@@ -560,11 +409,38 @@ function makeTab(group: Group, opts: {
       }
     }
   )
-  if (opts.ccActive) tabRef.ccActive = true
   group.tabs.push(tabRef)
   tabRef.mount(hostsEl!)
-  recordTabHistory(tabRef, group.name, true)
   return tabRef
+}
+
+// 运行中的分组：没有就按 store 记录建一个并按 store 顺序插入
+function liveGroup(groupId: string): Group | null {
+  const existing = findGroup(groupId)
+  if (existing) return existing
+  const rec = store.groups.find((g) => g.id === groupId)
+  if (!rec) return null
+  const g: Group = { id: rec.id, name: rec.name, cwd: rec.cwd, collapsed: rec.collapsed, tabs: [] }
+  groups.push(g)
+  const order = store.groups.map((x) => x.id)
+  groups.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
+  return g
+}
+
+// 新建标签页：先写 store，再按记录建运行中的标签
+async function createTab(groupId: string, name: string, autoLaunchCC: boolean, stack?: string[]): Promise<TerminalTab | null> {
+  const id = uid('t_')
+  await op({ op: 'createTab', id, groupId, name, autoLaunchCC, stack })
+  const g = liveGroup(groupId)
+  const rec = tabRec(id)
+  if (!g || !rec) return null
+  return mountTab(g, rec)
+}
+
+async function createGroup(name: string, cwd: string): Promise<string> {
+  const id = uid('g_')
+  await op({ op: 'createGroup', id, name, cwd })
+  return id
 }
 
 async function spawnTabPty(tab: TerminalTab): Promise<void> {
@@ -586,32 +462,30 @@ async function spawnTabsBatched(tabs: TerminalTab[]): Promise<void> {
   }
 }
 
+// 从 cc 对话记录补最后活跃时间
 async function refreshSessionMeta(tab: TerminalTab): Promise<void> {
-  let changed = false
   for (const s of tab.sessions) {
     const meta = await window.term.claudeSessionMeta(s.sessionId)
     if (!meta.exists) continue
     if (meta.lastTs && meta.lastTs !== s.lastTs) {
-      s.lastTs = meta.lastTs
-      changed = true
+      await op({ op: 'touchSession', id: s.sessionId, lastTs: meta.lastTs })
     }
-  }
-  if (changed) {
-    scheduleSave()
-    refreshUI()
   }
 }
 
-function ensureGroup(opts: { name: string; cwd: string }): Group {
-  const g: Group = {
-    id: uid('g_'),
-    name: opts.name,
-    cwd: opts.cwd,
-    collapsed: false,
-    tabs: []
+function rememberCwd(cwd: string): void {
+  if (cwd && cwd !== settings.lastUsedCwd) {
+    settings = { ...settings, lastUsedCwd: cwd }
+    void window.term.saveSettings(settings)
   }
-  groups.push(g)
-  return g
+}
+
+async function openNewTab(tab: TerminalTab | null): Promise<void> {
+  if (!tab) return
+  activeTabId = tab.id
+  activateUI(tab.id)
+  void op({ op: 'setActiveTab', id: tab.id })
+  await spawnTabPty(tab)
 }
 
 export async function newGroup(): Promise<void> {
@@ -631,32 +505,24 @@ export async function newGroup(): Promise<void> {
     onPickCwd: (cur) => window.term.pickDirectory(cur || prefilledCwd),
     onOk: async (v) => {
       const cwd = v.cwd?.trim() || ''
-      const g = ensureGroup({ name: v.name, cwd })
-      refreshUI()
-      const firstTabName = v.tabName?.trim() || 'A'
-      const tab = makeTab(g, { name: firstTabName, autoLaunchCC: v.autoLaunchCC })
-      activeTabId = tab.id
-      activateUI(tab.id)
-      await spawnTabPty(tab)
-      if (cwd && cwd !== settings.lastUsedCwd) {
-        settings = { ...settings, lastUsedCwd: cwd }
-        void window.term.saveSettings(settings)
-      }
-      scheduleSave()
-      toast(t('已新建分组「{0}」', g.name))
+      const gid = await createGroup(v.name, cwd)
+      const tab = await createTab(gid, v.tabName?.trim() || 'A', v.autoLaunchCC === true)
+      await openNewTab(tab)
+      rememberCwd(cwd)
+      toast(t('已新建分组「{0}」', v.name))
     }
   })
 }
 
-// 右键"在此处打开"：同 cwd 的 live 分组直接加 tab，否则新建并重绑已保存分组的 srcId（触发 dirty 提示保存）。
+// 磁盘根（D:\ 等）没有"最后一段"，美化成「D 盘」
 function basenameOfPath(p: string): string {
-  // 磁盘根（D:\ 等）没有"最后一段"，美化成「D 盘」
   const drive = /^([a-zA-Z]):[\\/]?$/.exec(p.trim())
   if (drive) return t('{0} 盘', drive[1].toUpperCase())
   const segs = p.split(/[\\/]+/).filter(Boolean)
   return segs[segs.length - 1] ?? p
 }
 
+// 右键"在此处打开"：同 cwd 的运行中分组直接加标签，否则新建分组
 async function openHereWithPath(rawPath: string): Promise<void> {
   const p = (rawPath || '').trim()
   if (!p) return
@@ -665,27 +531,13 @@ async function openHereWithPath(rawPath: string): Promise<void> {
     toast(t('路径不存在：{0}', p))
     return
   }
-  const bn = basenameOfPath(p) || p
-  const cc = settings.defaults.autoLaunchCC
-  let g = groups.find((x) => x.cwd === p)
-  if (!g) {
-    g = ensureGroup({ name: bn, cwd: p })
-    const saved = savedGroups.find((s) => s.name === g!.name && s.cwd === g!.cwd)
-    if (saved) saved.srcId = g.id
-  }
-  const tabName = String.fromCharCode(65 + g.tabs.length)
-  const tab = makeTab(g, { name: tabName, autoLaunchCC: cc })
-  g.collapsed = false
-  activeTabId = tab.id
-  refreshUI()
-  activateUI(tab.id)
-  await spawnTabPty(tab)
-  scheduleSave()
-  if (p !== settings.lastUsedCwd) {
-    settings = { ...settings, lastUsedCwd: p }
-    void window.term.saveSettings(settings)
-  }
-  toast(t('已在「{0}」新建标签', g.name))
+  const live = groups.find((x) => x.cwd === p)
+  const gid = live ? live.id : await createGroup(basenameOfPath(p) || p, p)
+  const count = live ? live.tabs.length : 0
+  const tab = await createTab(gid, String.fromCharCode(65 + count), settings.defaults.autoLaunchCC)
+  await openNewTab(tab)
+  rememberCwd(p)
+  toast(t('已在「{0}」新建标签', findGroup(gid)?.name ?? p))
 }
 
 export async function promptNewTabInGroup(groupId: string): Promise<void> {
@@ -702,13 +554,7 @@ export async function promptNewTabInGroup(groupId: string): Promise<void> {
     ccChecked: settings.defaults.autoLaunchCC,
     okLabel: t('创建'),
     onOk: async (v) => {
-      const tab = makeTab(g, { name: v.name, autoLaunchCC: v.autoLaunchCC })
-      g.collapsed = false
-      activeTabId = tab.id
-      refreshUI()
-      activateUI(tab.id)
-      await spawnTabPty(tab)
-      scheduleSave()
+      await openNewTab(await createTab(groupId, v.name, v.autoLaunchCC === true))
     }
   })
 }
@@ -716,41 +562,6 @@ export async function promptNewTabInGroup(groupId: string): Promise<void> {
 function activateUI(tabId: string): void {
   for (const g of groups) for (const t of g.tabs) t.setActive(t.id === tabId)
   refreshUI()
-}
-
-// 管理弹窗里对"已保存分组"新增标签：确认后打开该分组 + 新标签，并立即写回保存快照（不留脏）。
-export function addTabToSavedGroup(savedId: string): void {
-  const s = savedGroups.find((x) => x.id === savedId)
-  if (!s) return
-  openModal({
-    kind: 'new-tab',
-    title: t('在「{0}」新增标签页', s.name),
-    sub: t('将在后台打开并保存到该分组。'),
-    name: String.fromCharCode(65 + Math.min(25, s.snapshot.tabs.length)),
-    cwd: undefined,
-    showCC: true,
-    ccChecked: settings.defaults.autoLaunchCC,
-    okLabel: t('创建'),
-    onOk: async (v) => {
-      // 复用已打开实例（srcId → name+cwd 兜底），并重绑 srcId 供 isGroupDirty/autoSync 命中
-      let g = groups.find((x) => x.id === s.srcId)
-        || groups.find((x) => x.name === s.name && x.cwd === s.cwd)
-      if (!g) g = ensureGroup({ name: s.name, cwd: s.cwd })
-      s.srcId = g.id
-      const tab = makeTab(g, { name: v.name, autoLaunchCC: v.autoLaunchCC, dirty: false })
-      g.collapsed = false
-      activeTabId = tab.id
-      activateUI(tab.id)
-      await spawnTabPty(tab)
-      const savedAt = new Date().toISOString()
-      s.snapshot.tabs.push(snapshotTabFromLive(tab, savedAt))
-      s.savedAt = savedAt
-      tab.dirty = false
-      refreshUI()
-      scheduleSave()
-      toast(t('已在「{0}」新增并保存标签「{1}」', s.name, tab.name))
-    }
-  })
 }
 
 // 查看降级：切到 done 标签且主窗口有焦点，停留 N 秒后降回 idle；失焦暂停、回焦重新计满 N 秒。
@@ -809,7 +620,6 @@ function maybeStartDowngrade(tabId: string, st: TerminalTab['status']): void {
     c.tab.status = 'idle'
     c.tab.note = undefined
     refreshUI()
-    scheduleSave()
   }, settings.statusDowngradeSec * 1000)
 }
 
@@ -829,63 +639,95 @@ export function activateTab(tabId: string): void {
   clearDowngradeTimer()
   maybeStartDowngrade(tabId, ctx.tab.status)
   activateUI(tabId)
-  scheduleSave()
-  recordTabHistory(ctx.tab, ctx.group.name)
+  void op({ op: 'setActiveTab', id: tabId })
 }
 
-function disposeTabInternal(group: Group, tab: TerminalTab): void {
-  const idxInGroup = group.tabs.indexOf(tab)
-  if (idxInGroup < 0) return
-  group.tabs.splice(idxInGroup, 1)
-  tab.dispose()
-  if (activeTabId === tab.id) {
-    const next = pickNextActive(group, idxInGroup)
-    activeTabId = next?.id ?? null
-    if (next) activateUI(next.id)
+// 从运行中摘除一批标签（销毁 xterm/PTY），空分组一并移除，并挑下一个激活
+function unmountTabs(ids: string[]): void {
+  let nextActive: TerminalTab | null = null
+  for (const g of [...groups]) {
+    const idx = g.tabs.findIndex((x) => ids.includes(x.id))
+    for (const tab of g.tabs.filter((x) => ids.includes(x.id))) {
+      tab.dispose()
+      if (downgradeTabId === tab.id) clearDowngradeTimer()
+    }
+    g.tabs = g.tabs.filter((x) => !ids.includes(x.id))
+    if (activeTabId && ids.includes(activeTabId) && idx >= 0) {
+      nextActive = g.tabs[idx] || g.tabs[idx - 1] || null
+    }
+    if (g.tabs.length === 0) {
+      groups.splice(groups.indexOf(g), 1)
+    }
   }
+  if (activeTabId && ids.includes(activeTabId)) {
+    const next = nextActive ?? groups.flatMap((x) => x.tabs)[0] ?? null
+    activeTabId = next?.id ?? null
+    if (next) {
+      activateUI(next.id)
+      void op({ op: 'setActiveTab', id: next.id })
+    }
+  }
+  refreshUI()
 }
 
+async function closeTabsNow(ids: string[]): Promise<void> {
+  unmountTabs(ids)
+  await op({ op: 'closeTabs', ids })
+}
+
+function busyCountOf(tabs: TerminalTab[]): number {
+  return tabs.filter((x) => x.status === 'busy' || x.status === 'attention').length
+}
+
+// 关闭的标签页进历史，可从历史找回；只有会打断正在进行的回合时才确认
 export function closeTab(tabId: string): void {
   const ctx = findTab(tabId)
   if (!ctx) return
-  const { group, tab } = ctx
-  const isLast = group.tabs.length === 1
-  const finalize = (): void => {
-    disposeTabInternal(group, tab)
-    if (group.tabs.length === 0) {
-      const idx = groups.indexOf(group)
-      if (idx >= 0) groups.splice(idx, 1)
-    }
-    refreshUI()
-    scheduleSave()
-  }
-  // 纯 pwsh 标签且非分组最后一个 → 跳过确认；最后一个会连带关分组，仍确认
-  if (isTabExpendable(tab) && !isLast) {
-    finalize()
+  const { tab } = ctx
+  if (busyCountOf([tab]) === 0) {
+    void closeTabsNow([tabId])
     return
   }
   confirmDialog({
     title: t('关闭标签「{0}」？', tab.name),
-    message: t('该标签下有 <b>{0}</b> 条会话，关闭后该标签将从分组移除。', tab.sessions.length) +
-      (isLast ? t('<br/>这是分组「{0}」的最后一个标签，关闭后<b>分组也会被关闭</b>。', escapeHtml(group.name)) : ''),
+    message: t('该标签正在运行或待决策，关闭会立即中断。'),
     okLabel: t('关闭标签'),
-    onOk: finalize
+    onOk: () => void closeTabsNow([tabId])
+  })
+}
+
+function closeGroup(groupId: string): void {
+  const g = findGroup(groupId)
+  if (!g) return
+  const ids = g.tabs.map((x) => x.id)
+  const busyCount = busyCountOf(g.tabs)
+  const doClose = async (): Promise<void> => {
+    await closeTabsNow(ids)
+    toast(t('已关闭分组「{0}」', g.name))
+  }
+  if (busyCount === 0) {
+    void doClose()
+    return
+  }
+  confirmDialog({
+    title: t('关闭分组「{0}」？', g.name),
+    message: t('其中 <b>{0}</b> 个标签正在运行或待决策，关闭会立即中断。', busyCount),
+    okLabel: t('关闭分组'),
+    onOk: () => void doClose()
   })
 }
 
 // ── 重新加载标签 ────────────────────────────────────────────────
-// 等价于「就地关掉再原样恢复」：标签本身、分组、顺序、会话栈、备注、窗口归属全部保留，
+// 等价于「就地关掉再原样恢复」：标签本身、分组、顺序、会话栈、备注全部保留，
 // 只把 PTY 连同其中的前台进程换成新的 —— 于是新 shell 重新继承系统环境变量，
 // 新起的 cc 也重新读 ~/.claude 配置（改完配置不必手动 Ctrl+C 再敲 --resume）。
-// 刻意不走 closeTab + 历史恢复：那会换 tabId、改标签顺序、重走 tabRelease/tabClaim，
-// 副窗口最后一个标签还会把窗口关掉。
 const reloadingTabs = new Set<string>()
 
 async function doReloadTab(tabId: string): Promise<void> {
   const ctx = findTab(tabId)
   if (!ctx || reloadingTabs.has(tabId)) return
   const { tab } = ctx
-  // reload 前 cc 活跃（含手敲 cct 起的）→ 新 PTY 里按原 activeSessionId 续上
+  // reload 前 cc 活跃（含手敲 cct 起的）→ 新 PTY 里按主会话续上
   if (tab.autoLaunchCC || tab.ccActive) resumeCcOnNextStart.add(tab.id)
   reloadingTabs.add(tabId)
   // 进程态全部归零：旧 PTY 的 busy/报错说明和 cc 活跃标记都不该带到新进程
@@ -899,10 +741,7 @@ async function doReloadTab(tabId: string): Promise<void> {
     console.error('[reload] failed', e)
   } finally {
     reloadingTabs.delete(tabId)
-    // 重载期间标签可能已被关掉/拖到别的窗口：重新定位再决定收尾
-    const after = findTab(tabId)
-    if (after) recordTabHistory(after.tab, after.group.name, true)
-    else resumeCcOnNextStart.delete(tabId)
+    if (!findTab(tabId)) resumeCcOnNextStart.delete(tabId)
     refreshUI()
   }
 }
@@ -931,57 +770,31 @@ export function reloadTab(tabId: string): void {
   })
 }
 
-function pickNextActive(group: Group, idxInGroup: number): TerminalTab | null {
-  const sibling = group.tabs[idxInGroup] || group.tabs[idxInGroup - 1]
-  if (sibling) return sibling
-  for (const g of groups) {
-    if (g.tabs.length > 0) return g.tabs[0]
-  }
-  return null
-}
-
 export function renameTab(tabId: string, newName: string): void {
-  const ctx = findTab(tabId)
-  if (!ctx) return
   if (!newName.trim()) return
-  ctx.tab.name = newName.trim()
-  ctx.tab.dirty = true
-  refreshUI()
-  scheduleSave()
+  void op({ op: 'renameTab', id: tabId, name: newName.trim() })
 }
 
 export function toggleGroupCollapse(groupId: string): void {
   const g = findGroup(groupId)
   if (!g) return
-  g.collapsed = !g.collapsed
-  refreshUI()
-  scheduleSave()
+  void op({ op: 'setCollapsed', ids: [groupId], collapsed: !g.collapsed })
 }
 
 export function setAllGroupsCollapsed(collapsed: boolean): void {
-  if (groups.length === 0) return
-  let changed = false
-  for (const g of groups) {
-    if (g.collapsed !== collapsed) {
-      g.collapsed = collapsed
-      changed = true
-    }
-  }
-  if (!changed) return
-  refreshUI()
-  scheduleSave()
+  const ids = groups.filter((g) => g.collapsed !== collapsed).map((g) => g.id)
+  if (ids.length === 0) return
+  void op({ op: 'setCollapsed', ids, collapsed })
 }
 
-export function locateActiveTab(): void {
+export async function locateActiveTab(): Promise<void> {
   const ctx = activeContext()
   if (!ctx) {
     toast(t('当前没有活动标签'))
     return
   }
   if (ctx.group.collapsed) {
-    ctx.group.collapsed = false
-    refreshUI()
-    scheduleSave()
+    await op({ op: 'setCollapsed', ids: [ctx.group.id], collapsed: false })
   }
   // React 渲染异步：刚展开分组的行元素要等下次 commit 才存在，DOM 查询延迟到 rAF
   requestAnimationFrame(() => {
@@ -1007,408 +820,9 @@ function renameGroup(groupId: string): void {
     sub: '',
     name: g.name,
     okLabel: t('保存'),
-    onOk: (v) => {
-      g.name = v.name
-      refreshUI()
-      scheduleSave()
+    onOk: async (v) => {
+      await op({ op: 'renameGroup', id: groupId, name: v.name })
       toast(t('已重命名分组'))
-    }
-  })
-}
-
-function snapshotTabFromLive(t: TerminalTab, savedAt: string): SavedTab {
-  return {
-    id: t.id,
-    name: t.name,
-    sessions: t.sessions.map((s) => ({ ...s })),
-    activeSessionId: t.activeSessionId,
-    autoLaunchCC: t.autoLaunchCC,
-    memo: t.memo,
-    savedAt
-  }
-}
-
-// 自动同步：tab 会话栈变化时若分组已保存，静默覆盖 saved 快照——外观没变就不打 dirty。
-function autoSyncTabToSaved(tab: TerminalTab, group: Group): void {
-  const saved = savedGroups.find((s) => s.srcId === group.id)
-  if (!saved) return
-  const savedAt = new Date().toISOString()
-  saved.snapshot.tabs = mergeTabsIntoSnapshot(saved.snapshot.tabs, [tab], savedAt)
-  saved.savedAt = savedAt
-}
-
-// 增量合并：以 tab.id 去重 upsert；不会从快照里删除已保存的标签
-function mergeTabsIntoSnapshot(snapTabs: SavedTab[], liveTabs: TerminalTab[], savedAt: string): SavedTab[] {
-  const out = [...snapTabs]
-  for (const t of liveTabs) {
-    const idx = out.findIndex((x) => x.id === t.id)
-    const next = snapshotTabFromLive(t, savedAt)
-    if (idx >= 0) out[idx] = next
-    else out.push(next)
-  }
-  return out
-}
-
-// 按 tab.id 去重合并；撞 id 时保留 savedAt 更新的那条。
-function mergeSavedTabLists(a: SavedTab[], b: SavedTab[]): SavedTab[] {
-  const map = new Map<string, SavedTab>()
-  for (const t of a) map.set(t.id, t)
-  for (const t of b) {
-    const ex = map.get(t.id)
-    if (!ex || (t.savedAt || '') > (ex.savedAt || '')) map.set(t.id, t)
-  }
-  return [...map.values()]
-}
-
-// 同名同路径的 saved 条目合并为一条（saveGroup / 启动加载后调用）。
-function dedupSavedByNameCwd(): void {
-  const byKey = new Map<string, SavedGroup>()
-  const out: SavedGroup[] = []
-  for (const s of savedGroups) {
-    const key = `${s.name}\x00${s.cwd}`
-    const first = byKey.get(key)
-    if (!first) {
-      byKey.set(key, s)
-      out.push(s)
-      continue
-    }
-    first.snapshot.tabs = mergeSavedTabLists(first.snapshot.tabs, s.snapshot.tabs)
-    if ((s.savedAt || '') > (first.savedAt || '')) {
-      first.savedAt = s.savedAt
-      first.snapshot.name = s.snapshot.name
-      first.snapshot.cwd = s.snapshot.cwd
-    }
-    // srcId：优先保留指向当前活着的 live 分组，更便于后续 autoSync 命中
-    const firstAlive = !!(first.srcId && findGroup(first.srcId))
-    const sAlive = !!(s.srcId && findGroup(s.srcId))
-    if (!firstAlive && sAlive) first.srcId = s.srcId
-  }
-  savedGroups.splice(0, savedGroups.length, ...out)
-}
-
-// 查找 merge 目标：先按 srcId，再按 name+cwd 兜底。
-function findSavedForGroup(g: Group): SavedGroup | undefined {
-  const bySrc = savedGroups.find((s) => s.srcId === g.id)
-  if (bySrc) return bySrc
-  return savedGroups.find((s) => s.name === g.name && s.cwd === g.cwd)
-}
-
-function saveGroup(groupId: string): void {
-  const g = findGroup(groupId)
-  if (!g) return
-  const savedAt = new Date().toISOString()
-  const existing = findSavedForGroup(g)
-  if (existing) {
-    existing.srcId = g.id
-    existing.name = g.name
-    existing.cwd = g.cwd
-    existing.savedAt = savedAt
-    existing.snapshot = {
-      name: g.name,
-      cwd: g.cwd,
-      tabs: mergeTabsIntoSnapshot(existing.snapshot.tabs, g.tabs, savedAt)
-    }
-  } else {
-    savedGroups.unshift({
-      id: uid('sv_'),
-      name: g.name,
-      cwd: g.cwd,
-      savedAt,
-      snapshot: {
-        name: g.name,
-        cwd: g.cwd,
-        tabs: g.tabs.map((t) => snapshotTabFromLive(t, savedAt))
-      },
-      srcId: g.id
-    })
-  }
-  dedupSavedByNameCwd()
-  for (const t of g.tabs) t.dirty = false
-  refreshUI()
-  scheduleSave()
-  toast(t('已保存「{0}」（{1} 个标签）', g.name, g.tabs.length))
-}
-
-function saveTab(tabId: string): void {
-  const ctx = findTab(tabId)
-  if (!ctx) return
-  const { group: g, tab } = ctx
-  const savedAt = new Date().toISOString()
-  let saved = findSavedForGroup(g)
-  if (!saved) {
-    saved = {
-      id: uid('sv_'),
-      name: g.name,
-      cwd: g.cwd,
-      savedAt,
-      snapshot: { name: g.name, cwd: g.cwd, tabs: [] },
-      srcId: g.id
-    }
-    savedGroups.unshift(saved)
-  } else {
-    saved.srcId = g.id
-  }
-  saved.snapshot.tabs = mergeTabsIntoSnapshot(saved.snapshot.tabs, [tab], savedAt)
-  saved.savedAt = savedAt
-  saved.name = g.name
-  saved.cwd = g.cwd
-  saved.snapshot.name = g.name
-  saved.snapshot.cwd = g.cwd
-  dedupSavedByNameCwd()
-  tab.dirty = false
-  refreshUI()
-  scheduleSave()
-  toast(t('已保存标签「{0}」', tab.name))
-}
-
-function closeGroup(groupId: string): void {
-  const g = findGroup(groupId)
-  if (!g) return
-  const pureNonCc = isPureNonCcGroup(g)
-  const saved = savedGroups.some((s) => s.srcId === g.id) && !isGroupDirty(g)
-  const busyCount = g.tabs.filter((t) => t.status === 'busy' || t.status === 'attention').length
-  const busyHint = busyCount > 0
-    ? t('<br/><b>注意</b>：其中 <b>{0}</b> 个标签正在运行或待决策，关闭会立即中断。', busyCount)
-    : ''
-  const doClose = (): void => {
-    for (const t of g.tabs) {
-      t.dispose()
-    }
-    const idx = groups.indexOf(g)
-    groups.splice(idx, 1)
-    if (activeTabId && !findTab(activeTabId)) {
-      const next = groups.flatMap((x) => x.tabs)[0]
-      activeTabId = next?.id ?? null
-      if (next) activateUI(next.id)
-    }
-    refreshUI()
-    scheduleSave()
-    toast(t('已关闭分组「{0}」', g.name))
-  }
-  // 纯 pwsh 分组 + 无 busy → 直接关闭；其余一律二次确认
-  if (pureNonCc && busyCount === 0) {
-    doClose()
-    return
-  }
-  confirmDialog({
-    title: t('关闭分组「{0}」？', g.name),
-    message: t('将关闭该分组下的 {0} 个标签。', g.tabs.length) +
-      (saved
-        ? t('该分组<b>已保存</b>，之后可在「已保存的分组」一键恢复。')
-        : t('该分组<b>尚未保存</b>（或有改动未保存），关闭后将无法恢复其标签布局。')) +
-      busyHint,
-    okLabel: t('关闭分组'),
-    onOk: doClose
-  })
-}
-
-const PICK_ACTION_NEW_BLANK = '__new_blank__'
-
-// 按 tabIds 把保存的标签实例化进 live 分组（已在 live 的跳过）；含 NEW_BLANK 则再建空白标签并同步进快照。
-export async function restoreSavedTabs(
-  savedId: string,
-  tabIds: string[],
-  blankName?: string,
-  blankAutoLaunchCC?: boolean,
-  // 会话级恢复：tabId → 指定的活跃会话；会话栈整份照带
-  sessionOverride?: Map<string, string>
-): Promise<void> {
-  const s = savedGroups.find((x) => x.id === savedId)
-  if (!s) return
-  const addBlank = tabIds.includes(PICK_ACTION_NEW_BLANK)
-  const realIds = tabIds.filter((id) => id !== PICK_ACTION_NEW_BLANK)
-  const wanted = new Set(realIds)
-  const picks = s.snapshot.tabs.filter((t) => wanted.has(t.id))
-
-  let g = s.srcId ? findGroup(s.srcId) : undefined
-  const created: TerminalTab[] = []
-  if (!g) {
-    g = ensureGroup({ name: s.name, cwd: s.cwd })
-    s.srcId = g.id
-  }
-  const liveIds = new Set(g.tabs.map((t) => t.id))
-  beginHistoryBatch()
-  try {
-    for (const t of picks) {
-      if (liveIds.has(t.id)) continue
-      const tab = makeTab(g, {
-        id: t.id,
-        name: t.name,
-        sessions: t.sessions,
-        activeSessionId: sessionOverride?.get(t.id) ?? t.activeSessionId,
-        autoLaunchCC: t.autoLaunchCC,
-        memo: t.memo,
-        dirty: false
-      })
-      created.push(tab)
-    }
-    let blank: TerminalTab | null = null
-    if (addBlank) {
-      const nm = blankName?.trim() || String.fromCharCode(65 + g.tabs.length)
-      const cc = blankAutoLaunchCC ?? settings.defaults.autoLaunchCC
-      blank = makeTab(g, {
-        name: nm,
-        autoLaunchCC: cc,
-        dirty: false
-      })
-      created.push(blank)
-      autoSyncTabToSaved(blank, g)
-    }
-    // 真正带进标签才记恢复时间（卡片顶到侧边栏最前），no-op 不改时间
-    if (created.length > 0) s.lastRestoredAt = new Date().toISOString()
-    const firstCreated = created[0]
-    if (firstCreated) {
-      activeTabId = firstCreated.id
-    } else if (!activeTabId) {
-      const fb = g.tabs[0]
-      if (fb) activeTabId = fb.id
-    }
-    refreshUI()
-    if (activeTabId) activateUI(activeTabId)
-    await spawnTabsBatched(created)
-  } finally {
-    flushHistoryBatch()
-  }
-  scheduleSave()
-  const restoredN = created.length - (addBlank ? 1 : 0)
-  if (created.length === 0) toast(t('分组「{0}」已经打开', s.name))
-  else if (restoredN === 0 && addBlank) toast(t('在「{0}」新建了 1 个空白标签', s.name))
-  else if (addBlank) toast(t('已恢复「{0}」{1} 个标签 + 1 个新空白', s.name, restoredN))
-  else toast(t('已恢复「{0}」的 {1} 个标签', s.name, restoredN))
-}
-
-export function restoreSavedAll(savedId: string): void {
-  const s = savedGroups.find((x) => x.id === savedId)
-  if (!s) return
-  void restoreSavedTabs(savedId, s.snapshot.tabs.map((t) => t.id))
-}
-
-export function openRestoreSelect(savedId: string): void {
-  const s = savedGroups.find((x) => x.id === savedId)
-  if (!s) return
-  if (s.snapshot.tabs.length === 0) {
-    toast(t('该保存的分组里没有标签'))
-    return
-  }
-  const live = s.srcId ? findGroup(s.srcId) : undefined
-  const liveIds = new Set(live?.tabs.map((t) => t.id) ?? [])
-  // 会话级恢复：tabId → 指定的活跃会话，点「恢复」时连同勾选传给 restoreSavedTabs
-  const overrides = new Map<string, string>()
-  const items: PickItem[] = s.snapshot.tabs.map((st) => {
-    const inLive = liveIds.has(st.id)
-    const activeId = st.activeSessionId ?? st.sessions[st.sessions.length - 1]?.sessionId
-    return {
-      id: st.id,
-      label: st.name,
-      meta: inLive ? t('已在当前分组中') : t('{0} 个会话', st.sessions.length),
-      disabled: inLive,
-      defaultChecked: false,
-      deleteTitle: t('从保存里删除此标签'),
-      onDelete: () => deleteSavedTabFromPicker(savedId, st.id, st.name),
-      sessionPick: inLive
-        ? undefined
-        : {
-            // 列出全部会话（含默认名「会话 N」），恢复哪个由用户自己选
-            entries: st.sessions
-              .map((se) => ({
-                sessionId: se.sessionId,
-                title: sessionTitle(se, st.sessions),
-                source: se.source,
-                ts: se.lastTs ?? se.createdAt,
-                isDefault: se.sessionId === activeId
-              })),
-            onPick: (sid) => {
-              if (sid) overrides.set(st.id, sid)
-              else overrides.delete(st.id)
-            }
-          }
-    }
-  })
-  items.push({
-    id: PICK_ACTION_NEW_BLANK,
-    label: '',
-    defaultChecked: false,
-    inputPlaceholder: t('+ 新建标签页'),
-    sideToggle: {
-      defaultChecked: settings.defaults.autoLaunchCC,
-      label: t('启动 CC'),
-      title: t('新建标签是否自动启动 Claude Code；默认值来自「设置 → 通用」')
-    }
-  })
-  openPickTabs({
-    title: t('恢复标签'),
-    items,
-    okLabel: t('恢复'),
-    onOk: (ids, inputs, toggles) =>
-      void restoreSavedTabs(
-        savedId,
-        ids,
-        inputs[PICK_ACTION_NEW_BLANK],
-        toggles[PICK_ACTION_NEW_BLANK],
-        overrides
-      )
-  })
-}
-
-// pick 弹窗里删单个标签：二次确认后从快照抽掉；删空也保留分组卡片。
-function deleteSavedTabFromPicker(savedId: string, tabId: string, tabName: string): void {
-  const s = savedGroups.find((x) => x.id === savedId)
-  if (!s) return
-  confirmDialog({
-    title: t('从保存里移除「{0}」？', tabName),
-    message: t('只把该标签从保存记录里删除，已打开的实例不受影响。'),
-    okLabel: t('删除'),
-    onOk: () => {
-      const idx = s.snapshot.tabs.findIndex((t) => t.id === tabId)
-      if (idx < 0) return
-      s.snapshot.tabs.splice(idx, 1)
-      refreshUI()
-      scheduleSave()
-      if (s.snapshot.tabs.length === 0) {
-        closePickTabs()
-        toast(t('「{0}」已没有保存的标签', s.name))
-        return
-      }
-      // 弹窗里就地刷新一遍 —— 复用 openRestoreSelect，不闪不丢焦点。
-      openRestoreSelect(savedId)
-    }
-  })
-}
-
-// 未接线的备用入口，保留导出
-export function deleteSaved(savedId: string): void {
-  const idx = savedGroups.findIndex((s) => s.id === savedId)
-  if (idx < 0) return
-  const s = savedGroups[idx]
-  confirmDialog({
-    title: t('删除已保存的「{0}」？', s.name),
-    message: t('只删除保存记录，不影响当前打开的分组。'),
-    okLabel: t('删除'),
-    onOk: () => {
-      savedGroups.splice(idx, 1)
-      refreshUI()
-      scheduleSave()
-      toast(t('已删除保存的分组'))
-    }
-  })
-}
-
-// 未接线的备用入口，保留导出
-export function renameSaved(savedId: string): void {
-  const s = savedGroups.find((x) => x.id === savedId)
-  if (!s) return
-  openModal({
-    kind: 'rename',
-    title: t('重命名已保存的分组'),
-    sub: '',
-    name: s.name,
-    okLabel: t('保存'),
-    onOk: (v) => {
-      s.name = v.name
-      s.snapshot.name = v.name
-      dedupSavedByNameCwd()
-      refreshUI()
-      scheduleSave()
     }
   })
 }
@@ -1421,18 +835,7 @@ async function openSessionInNewTab(sessionId: string): Promise<void> {
   const sess = tab.sessions.find((s) => s.sessionId === sessionId)
   if (!sess) return
   const name = tabNameForSession(sess)
-  const newTab = makeTab(group, {
-    name,
-    sessions: [{ ...sess }],
-    activeSessionId: sess.sessionId,
-    autoLaunchCC: true
-  })
-  group.collapsed = false
-  activeTabId = newTab.id
-  refreshUI()
-  activateUI(newTab.id)
-  await spawnTabPty(newTab)
-  scheduleSave()
+  await openNewTab(await createTab(group.id, name, true, [sessionId]))
   toast(t('已在新标签打开会话「{0}」', name))
 }
 
@@ -1441,7 +844,7 @@ function tabNameForSession(s: SessionRecord): string {
   return raw.length > 20 ? raw.slice(0, 19) + '…' : raw
 }
 
-// ─── 栈内会话右键菜单（重命名 / 删除；改完默认同步到 saved） ──────
+// ─── 栈内会话右键菜单（重命名 / 删除） ──────
 export function openSessionCtx(sessionId: string, x: number, y: number): void {
   const ctx = activeContext()
   if (!ctx) return
@@ -1470,69 +873,54 @@ function renameSession(sessionId: string, forceText?: string): void {
   if (!ctx) return
   const sess = ctx.tab.sessions.find((s) => s.sessionId === sessionId)
   if (!sess) return
-  const apply = (v: string): void => {
-    const trimmed = v.trim()
-    if (trimmed) sess.userTitle = trimmed
-    else delete sess.userTitle
-    autoSyncTabToSaved(ctx.tab, ctx.group)
-    refreshUI()
-    scheduleSave()
-  }
   // 显式清除分支：右键「清除自定义标题」时跳过 modal
   if (forceText === '') {
-    apply('')
+    void op({ op: 'renameSession', id: sessionId, title: null })
     toast(t('已清除自定义标题'))
     return
   }
-  const current = sess.userTitle ?? ''
   openModal({
     kind: 'rename',
     title: t('重命名会话'),
     sub: t('留空则恢复默认名。'),
-    name: current,
+    name: sess.userTitle ?? '',
     okLabel: t('保存'),
-    onOk: (v) => apply(v.name)
+    onOk: (v) => void op({ op: 'renameSession', id: sessionId, title: v.name })
   })
 }
 
 async function deleteSession(sessionId: string): Promise<void> {
   const ctx = activeContext()
   if (!ctx) return
-  const { group, tab } = ctx
+  const { tab } = ctx
   if (tab.sessions.length <= 1) return
-  const idx = tab.sessions.findIndex((s) => s.sessionId === sessionId)
-  if (idx < 0) return
-  const sess = tab.sessions[idx]
-  const wasActive = tab.activeSessionId === sessionId
+  const sess = tab.sessions.find((s) => s.sessionId === sessionId)
+  if (!sess) return
+  const wasTop = tab.activeSessionId === sessionId
   const title = sess.userTitle || defaultSessionTitle(sess, tab.sessions)
   confirmDialog({
     title: t('删除会话「{0}」？', title),
-    message: wasActive
+    message: wasTop
       ? t('这是当前激活的会话，删除后会切回最近的会话并重启 shell。<br/>会话记录仍保留在磁盘，只是不再显示在这个标签里。')
       : t('只从这个标签的列表里移除，磁盘上的会话记录不受影响。'),
     okLabel: t('删除'),
-    onOk: () => {
-      tab.sessions.splice(idx, 1)
-      if (wasActive) {
-        const top = tab.sessions[tab.sessions.length - 1]
-        tab.activeSessionId = top?.sessionId
-        void tab.restartPty()
+    onOk: async () => {
+      await op({ op: 'removeSession', tabId: tab.id, sessionId })
+      if (wasTop) {
+        await tab.restartPty()
       }
-      autoSyncTabToSaved(tab, group)
-      refreshUI()
-      scheduleSave()
       toast(t('已删除会话'))
     }
   })
 }
 
+// 切换会话：设为栈顶后重启 PTY，launchCC 按新栈顶 --resume
 export async function switchSession(sessionId: string): Promise<void> {
   const ctx = activeContext()
   if (!ctx) return
   const { tab } = ctx
   if (!tab.sessions.some((s) => s.sessionId === sessionId)) return
-  tab.activeSessionId = sessionId
-  scheduleSave()
+  await op({ op: 'setTop', tabId: tab.id, sessionId })
   await tab.restartPty()
   refreshUI()
 }
@@ -1544,8 +932,6 @@ export function openGroupCtx(groupId: string, x: number, y: number): void {
     [
       { label: t('新建标签'), icon: icon('plus'), act: () => promptNewTabInGroup(g.id) },
       { label: t('重命名分组'), icon: icon('edit'), act: () => renameGroup(g.id) },
-      { sep: true },
-      { label: t('保存分组'), icon: icon('save'), act: () => saveGroup(g.id) },
       { sep: true },
       { label: t('关闭分组'), icon: icon('close'), danger: true, act: () => closeGroup(g.id) }
     ],
@@ -1562,7 +948,6 @@ export function markTabPending(tabId: string): void {
   ctx.tab.note = undefined
   if (downgradeTabId === tabId) clearDowngradeTimer()
   refreshUI()
-  scheduleSave()
 }
 
 // "标记为已查看"：手动清点（done/attention/error → idle）；busy 不清——cc 真在跑。
@@ -1575,7 +960,6 @@ export function markTabViewed(tabId: string): void {
   ctx.tab.note = undefined
   if (downgradeTabId === tabId) clearDowngradeTimer()
   refreshUI()
-  scheduleSave()
 }
 
 export function openTabCtx(tabId: string, x: number, y: number): void {
@@ -1589,11 +973,12 @@ export function openTabCtx(tabId: string, x: number, y: number): void {
   } else if (s === 'done' || s === 'attention' || s === 'error') {
     items.push({ label: t('标记为已查看'), icon: icon('square'), act: () => markTabViewed(tabId) })
   }
+  if (items.length > 0) {
+    items.push({ sep: true })
+  }
   showCtxMenu(
     [
       ...items,
-      { label: t('保存标签'), icon: icon('save'), act: () => saveTab(tabId) },
-      { sep: true },
       {
         label: t('重命名标签'),
         icon: icon('edit'),
@@ -1611,7 +996,7 @@ export function openTabCtx(tabId: string, x: number, y: number): void {
       // 添加/删除备注互斥：没备注给「添加」，有备注给「删除」（备注只能在这里删）
       ctx.tab.memo == null
         ? { label: t('添加备注'), icon: icon('sticky-note'), act: () => openTabMemoEditor(tabId, x, y) }
-        : { label: t('删除备注'), icon: icon('sticky-note'), danger: true, act: () => deleteTabMemo(tabId) },
+        : { label: t('删除备注'), icon: icon('sticky-note'), danger: true, act: () => void op({ op: 'setMemo', id: tabId, memo: null }) },
       { label: t('在本组新建标签'), icon: icon('plus'), act: () => promptNewTabInGroup(ctx.group.id) },
       // 环境变量/cc 配置改完后就地换个新 PTY 生效，标签与会话都不动
       { label: t('重新加载标签页'), icon: icon('rotate-ccw'), act: () => reloadTab(tabId) },
@@ -1635,242 +1020,9 @@ export function openTabMemoEditor(tabId: string, x: number, y: number): void {
       const c = findTab(tabId)
       // 没改动不动状态；首次添加时 memo 还是 undefined，空文本也会落成空备注（右键项随之切到「删除备注」）
       if (!c || c.tab.memo === text) return
-      c.tab.memo = text
-      afterMemoChange(c)
+      void op({ op: 'setMemo', id: tabId, memo: text })
     }
   })
-}
-
-function deleteTabMemo(tabId: string): void {
-  const ctx = findTab(tabId)
-  if (!ctx) return
-  ctx.tab.memo = undefined
-  afterMemoChange(ctx)
-}
-
-// 备注跟标签走：变更写进所有已保存快照（分组 + 工作区）里同 id 的标签，
-// 「先保存工作区/分组、后加备注」的快照恢复也能带回最新备注；删除同理清掉。
-// 只就地改 memo 字段，不往快照里塞新标签（那是 autoSync 的语义）。
-function syncMemoIntoSnapshots(tabId: string, memo: string | undefined): void {
-  for (const s of savedGroups) {
-    for (const t of s.snapshot.tabs) {
-      if (t.id === tabId) t.memo = memo
-    }
-  }
-  for (const w of savedWorkspaces) {
-    for (const g of w.snapshot.groups) {
-      for (const t of g.tabs) {
-        if (t.id === tabId) t.memo = memo
-      }
-    }
-  }
-}
-
-// 备注变更后的统一收尾：刷 UI + 静默同步进已保存快照（不打 dirty）+ 立刻刷标签历史（未保存的标签靠历史找回备注）
-function afterMemoChange(ctx: { group: Group; tab: TerminalTab }): void {
-  refreshUI()
-  autoSyncTabToSaved(ctx.tab, ctx.group)
-  syncMemoIntoSnapshots(ctx.tab.id, ctx.tab.memo)
-  scheduleSave()
-  recordTabHistory(ctx.tab, ctx.group.name, true)
-}
-
-function nextWorkspaceDefaultName(): string {
-  let max = 0
-  for (const w of savedWorkspaces) {
-    // 中英两种默认名「工作区N」/「Workspace N」都参与取最大序号
-    const m = /^(?:工作区|Workspace\s*)(\d+)$/.exec(w.name)
-    if (m) max = Math.max(max, parseInt(m[1], 10))
-  }
-  return t('工作区{0}', max + 1)
-}
-
-function promptSaveWorkspace(): void {
-  if (groups.length === 0) {
-    toast(t('当前工作区为空，没什么可保存的'))
-    return
-  }
-  openModal({
-    kind: 'rename',
-    title: t('保存该工作区'),
-    sub: t('把当前打开的分组、每个分组下的标签整体存档，之后可一键恢复。'),
-    name: nextWorkspaceDefaultName(),
-    okLabel: t('保存'),
-    onOk: (v) => {
-      const nm = v.name.trim() || nextWorkspaceDefaultName()
-      saveCurrentAsWorkspace(nm)
-    }
-  })
-}
-
-function saveCurrentAsWorkspace(name: string): void {
-  const savedAt = new Date().toISOString()
-  const snapshotGroups: SavedWorkspaceSnapshotGroup[] = groups.map((g) => ({
-    id: g.id,
-    name: g.name,
-    cwd: g.cwd,
-    tabs: g.tabs.map((t) => ({
-      id: t.id,
-      name: t.name,
-      sessions: t.sessions,
-      activeSessionId: t.activeSessionId,
-      autoLaunchCC: t.autoLaunchCC,
-      memo: t.memo,
-      savedAt
-    }))
-  }))
-  savedWorkspaces.unshift({
-    id: uid('ws_'),
-    name,
-    savedAt,
-    snapshot: { groups: snapshotGroups, activeTabId }
-  })
-  refreshUI()
-  scheduleSave()
-  toast(t('已保存工作区「{0}」（{1} 个分组）', name, snapshotGroups.length))
-}
-
-// 把快照分组追加恢复到当前工作区（整体/单分组共用）；已打开的只补齐缺失标签。返回新建数。
-async function restoreSnapshotGroups(
-  sgs: SavedWorkspaceSnapshotGroup[],
-  preferActiveTabId: string | null
-): Promise<number> {
-  // 先建分组、收集标签规格；xterm/PTY 重活分批做
-  const pending: { group: Group; spec: Parameters<typeof makeTab>[1] }[] = []
-  for (const sg of sgs) {
-    let g = findGroup(sg.id)
-      || groups.find((x) => x.name === sg.name && x.cwd === sg.cwd)
-    if (!g) g = ensureGroup({ name: sg.name, cwd: sg.cwd })
-    // 有单分组保存记录则重绑 srcId，否则已保存分组恢复出来会因 srcId 对不上被误标脏
-    const saved = findSavedForGroup(g)
-    if (saved) saved.srcId = g.id
-    const liveIds = new Set(g.tabs.map((t) => t.id))
-    for (const t of sg.tabs) {
-      if (liveIds.has(t.id)) continue
-      pending.push({
-        group: g,
-        spec: {
-          id: t.id,
-          name: t.name,
-          sessions: t.sessions,
-          activeSessionId: t.activeSessionId,
-          autoLaunchCC: t.autoLaunchCC,
-          memo: t.memo,
-          dirty: false
-        }
-      })
-    }
-  }
-  refreshUI()
-  if (pending.length === 0) return 0
-
-  // 前台目标：快照的 active tab 或第一个；其所在批建好即激活，避免"先激活错的再跳"闪烁
-  const targetActiveId =
-    preferActiveTabId && pending.some((p) => p.spec.id === preferActiveTabId)
-      ? preferActiveTabId
-      : pending[0].spec.id
-
-  let activated = false
-  beginHistoryBatch()
-  try {
-    for (let i = 0; i < pending.length; i += RESTORE_BATCH) {
-      if (i > 0) await new Promise<void>((r) => requestAnimationFrame(() => r()))
-      const batchTabs = pending.slice(i, i + RESTORE_BATCH).map((p) => makeTab(p.group, p.spec))
-      refreshUI()
-      if (!activated) {
-        const hit = batchTabs.find((t) => t.id === targetActiveId)
-        if (hit) {
-          activeTabId = hit.id
-          activateUI(hit.id)
-          activated = true
-        }
-      }
-      await Promise.all(batchTabs.map((t) => spawnTabPty(t)))
-    }
-  } finally {
-    flushHistoryBatch()
-  }
-  scheduleSave()
-  return pending.length
-}
-
-export async function restoreSavedWorkspace(wsId: string): Promise<void> {
-  const w = savedWorkspaces.find((x) => x.id === wsId)
-  if (!w) return
-  const tabCount = w.snapshot.groups.reduce((n, g) => n + g.tabs.length, 0)
-  confirmDialog({
-    title: t('恢复工作区「{0}」', w.name),
-    message:
-      t('即将追加恢复 <b>{0}</b> 个分组、<b>{1}</b> 个标签到当前工作区。<br>已打开的同分组不会被覆盖，只会补齐缺失的标签。', w.snapshot.groups.length, tabCount),
-    okLabel: t('恢复'),
-    danger: false,
-    onOk: async () => {
-      const n = await restoreSnapshotGroups(w.snapshot.groups, w.snapshot.activeTabId)
-      w.lastRestoredAt = new Date().toISOString()
-      refreshUI()
-      scheduleSave()
-      toast(t('已恢复工作区「{0}」的 {1} 个新标签', w.name, n))
-    }
-  })
-}
-
-export function restoreWorkspaceGroup(wsId: string, groupId: string): void {
-  const w = savedWorkspaces.find((x) => x.id === wsId)
-  const sg = w?.snapshot.groups.find((g) => g.id === groupId)
-  if (!sg) return
-  void restoreSnapshotGroups([sg], null).then((n) => {
-    toast(t('已恢复分组「{0}」的 {1} 个新标签', sg.name, n))
-  })
-}
-
-export function deleteWorkspaceGroup(wsId: string, groupId: string): void {
-  const w = savedWorkspaces.find((x) => x.id === wsId)
-  if (!w) return
-  const idx = w.snapshot.groups.findIndex((g) => g.id === groupId)
-  if (idx < 0) return
-  w.snapshot.groups.splice(idx, 1)
-  refreshUI()
-  scheduleSave()
-}
-
-export function renameSavedWorkspace(wsId: string, newName: string): void {
-  const w = savedWorkspaces.find((x) => x.id === wsId)
-  if (!w) return
-  const nm = newName.trim()
-  if (!nm || nm === w.name) return
-  w.name = nm
-  refreshUI()
-  scheduleSave()
-}
-
-export function deleteSavedWorkspace(wsId: string): void {
-  const idx = savedWorkspaces.findIndex((x) => x.id === wsId)
-  if (idx < 0) return
-  const w = savedWorkspaces[idx]
-  confirmDialog({
-    title: t('删除已保存的工作区'),
-    message: t('确定删除「{0}」？<br>只删除这份工作区留档，不会删除任何分组和标签页。', escapeHtml(w.name)),
-    okLabel: t('删除'),
-    danger: true,
-    onOk: () => {
-      savedWorkspaces.splice(idx, 1)
-      refreshUI()
-      scheduleSave()
-    }
-  })
-}
-
-export function openWorkspacePaneCtx(x: number, y: number): void {
-  showCtxMenu(
-    [
-      {
-        label: t('保存该工作区'),
-        icon: icon('rotate-ccw'),
-        act: () => promptSaveWorkspace()
-      }
-    ],
-    x, y
-  )
 }
 
 export function getGroupViews(): GroupView[] {
@@ -1879,222 +1031,54 @@ export function getGroupViews(): GroupView[] {
     name: g.name,
     cwd: g.cwd,
     collapsed: g.collapsed,
-    tabs: g.tabs,
-    dirty: isGroupDirty(g)
+    tabs: g.tabs
   }))
 }
 
-// 侧边栏快捷区按「最近动过」倒序；管理页按名称排序，两处刻意不同。
-export function getSavedViews(): SavedView[] {
-  return [...savedGroups]
-    .sort((a, b) => recencyDesc(a.lastRestoredAt ?? a.savedAt, b.lastRestoredAt ?? b.savedAt))
-    .map((s) => ({
-      id: s.id,
-      name: s.name,
-      cwd: shortPath(s.cwd),
-      tabCount: s.snapshot.tabs.length,
-      savedAt: formatTs(s.savedAt)
-    }))
-}
-
-export function getSavedWorkspaceViews(): SavedWorkspaceView[] {
-  return [...savedWorkspaces]
-    .sort((a, b) => recencyDesc(a.lastRestoredAt ?? a.savedAt, b.lastRestoredAt ?? b.savedAt))
-    .map((w) => ({
-      id: w.id,
-      name: w.name,
-      savedAt: formatTs(w.savedAt),
-      groupCount: w.snapshot.groups.length,
-      tabCount: w.snapshot.groups.reduce((n, g) => n + g.tabs.length, 0)
-    }))
-}
-
 export function reorderGroups(ids: string[]): void {
-  const map = new Map(groups.map((g) => [g.id, g]))
-  const next: Group[] = []
-  for (const id of ids) {
-    const g = map.get(id)
-    if (g) next.push(g)
-  }
-  for (const g of groups) if (!ids.includes(g.id)) next.push(g)
-  groups.splice(0, groups.length, ...next)
-  refreshUI()
+  void op({ op: 'reorderGroups', ids })
 }
 
-// Ctrl+S 保存当前脏分组：终端聚焦时由 TerminalTab 键处理器调（拦掉 XOFF），其余走 window keydown 兜底。
-export function saveActiveDirtyGroup(): void {
-  const g = groups.find((x) => x.tabs.some((t) => t.id === activeTabId))
-  if (!g) return
-  if (!isGroupDirty(g)) {
-    toast(t('「{0}」没有未保存的改动', g.name))
-    return
-  }
-  saveGroup(g.id)
+// 历史标签页：近 7 天关闭的标签，按关闭时间倒序
+const HISTORY_DAYS = 7
+export function getHistoryEntries(): HistoryEntry[] {
+  const since = Date.now() - HISTORY_DAYS * 86_400_000
+  return store.tabs
+    .filter((x) => x.closedAt && Date.parse(x.closedAt) >= since)
+    .sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? ''))
+    .map((x) => {
+      const g = store.groups.find((y) => y.id === x.groupId)
+      return {
+        tabId: x.id,
+        tabName: x.name,
+        groupName: g?.name ?? '',
+        cwd: g?.cwd ?? '',
+        autoLaunchCC: x.autoLaunchCC,
+        sessions: sessionsOfStack(x.stack),
+        activeSessionId: x.stack[0],
+        memo: x.memo,
+        openedAt: x.openedAt,
+        lastSeenAt: x.closedAt ?? x.lastSeenAt
+      }
+    })
 }
 
-function lastTsOf(t: SavedTab): string | undefined {
-  let best: string | undefined
-  for (const s of t.sessions) {
-    const v = s.lastTs ?? s.createdAt
-    if (!best || v > best) best = v
-  }
-  return best
+export async function deleteHistoryEntries(tabIds: string[]): Promise<void> {
+  await op({ op: 'deleteTabs', ids: tabIds })
 }
 
-export function getManageGroupViews(): ManageGroupView[] {
-  return [...savedGroups]
-    .sort((a, b) => naturalNameCompare(a.name, b.name))
-    .map((s) => ({
-      id: s.id,
-      name: s.name,
-      cwd: s.cwd,
-      savedAt: s.savedAt,
-      tabs: s.snapshot.tabs.map((t) => {
-        const activeId = t.activeSessionId ?? t.sessions[t.sessions.length - 1]?.sessionId
-        return {
-          id: t.id,
-          name: t.name,
-          sessions: t.sessions.map((se) => ({
-            sessionId: se.sessionId,
-            title: sessionTitle(se, t.sessions),
-            hasUserTitle: !!se.userTitle,
-            source: se.source,
-            ts: se.lastTs ?? se.createdAt,
-            isActive: se.sessionId === activeId
-          })),
-          savedAt: t.savedAt,
-          lastTs: lastTsOf(t),
-          memo: t.memo
-        }
-      })
-    }))
-}
-
-export function getManageWorkspaceViews(): ManageWorkspaceView[] {
-  return [...savedWorkspaces]
-    .sort((a, b) => naturalNameCompare(a.name, b.name))
-    .map((w) => ({
-      id: w.id,
-      name: w.name,
-      savedAt: w.savedAt,
-      groupCount: w.snapshot.groups.length,
-      tabCount: w.snapshot.groups.reduce((n, g) => n + g.tabs.length, 0),
-      groups: w.snapshot.groups.map((g) => ({
-        id: g.id,
-        name: g.name,
-        cwd: g.cwd,
-        tabCount: g.tabs.length
-      }))
-    }))
-}
-
-function manageRenameSaved(id: string, name: string): void {
-  const s = savedGroups.find((x) => x.id === id)
-  if (!s) return
-  s.name = name
-  s.snapshot.name = name
-  dedupSavedByNameCwd()
-  refreshUI()
-  scheduleSave()
-}
-
-function manageDeleteSaved(id: string): void {
-  const s = savedGroups.find((x) => x.id === id)
-  if (!s) return
-  confirmDialog({
-    title: t('删除已保存的「{0}」？', s.name),
-    message: t('会删除该分组下的所有标签页。只动保存记录，已打开的实例不受影响。'),
-    okLabel: t('删除'),
-    onOk: () => {
-      const idx = savedGroups.findIndex((x) => x.id === id)
-      if (idx >= 0) savedGroups.splice(idx, 1)
-      refreshUI()
-      scheduleSave()
-      toast(t('已删除保存的分组'))
-    }
-  })
-}
-
-function manageRenameSavedTab(savedId: string, tabId: string, newName: string): void {
-  const s = savedGroups.find((x) => x.id === savedId)
-  if (!s) return
-  const t = s.snapshot.tabs.find((x) => x.id === tabId)
-  if (!t || t.name === newName) return
-  t.name = newName
-  // 同步到已打开的同 id 标签（若存在），保持命名一致
-  for (const g of groups) {
-    const live = g.tabs.find((x) => x.id === tabId)
-    if (live) { live.name = newName }
-  }
-  refreshUI()
-  scheduleSave()
-}
-
-function manageDeleteSavedTab(savedId: string, tabId: string): void {
-  const s = savedGroups.find((x) => x.id === savedId)
-  if (!s) return
-  const idx = s.snapshot.tabs.findIndex((t) => t.id === tabId)
-  if (idx < 0) return
-  s.snapshot.tabs.splice(idx, 1)
-  refreshUI()
-  scheduleSave()
-}
-
-function restoreSavedOneTab(savedId: string, tabId: string): void {
-  void restoreSavedTabs(savedId, [tabId])
-}
-
-// 会话级恢复（入口②·管理页）：恢复该标签页，但把活跃会话指定为 sessionId（会话栈整份带过来）
-function restoreSavedTabAtSession(savedId: string, tabId: string, sessionId: string): void {
-  void restoreSavedTabs(savedId, [tabId], undefined, undefined, new Map([[tabId, sessionId]]))
-}
-
-export const savedManagerApi = {
-  onRename: manageRenameSaved,
-  onDelete: manageDeleteSaved,
-  onRenameTab: manageRenameSavedTab,
-  onDeleteTab: manageDeleteSavedTab,
-  onRestoreAll: restoreSavedAll,
-  onRestoreSelect: openRestoreSelect,
-  onRestoreOneTab: restoreSavedOneTab,
-  onRestoreTabAtSession: restoreSavedTabAtSession,
-  onAddTabToSaved: addTabToSavedGroup,
-  onRenameWorkspace: renameSavedWorkspace,
-  onDeleteWorkspace: deleteSavedWorkspace,
-  onRestoreWorkspace: (id: string): void => void restoreSavedWorkspace(id),
-  onRestoreWorkspaceGroup: restoreWorkspaceGroup,
-  onDeleteWorkspaceGroup: deleteWorkspaceGroup
-}
-
+// 重新打开历史标签页：沿用原 id、原分组与会话栈
 export async function restoreFromHistory(entry: HistoryEntry): Promise<void> {
-  let g = groups.find((x) => x.cwd === entry.cwd)
-  if (!g) g = ensureGroup({ name: entry.groupName || entry.cwd, cwd: entry.cwd })
-  if (g.tabs.some((t) => t.id === entry.tabId)) {
-    activeTabId = entry.tabId
-    activateUI(entry.tabId)
+  if (findTab(entry.tabId)) {
+    activateTab(entry.tabId)
     toast(t('已切到「{0}」', entry.tabName))
     return
   }
-  // tabId 已在保存快照里：视为"回到已保存位置"，不打脏，由 autoSync 拉齐快照。
-  // saved 匹配必须走 findSavedForGroup（name+cwd 兜底）并重绑 srcId，否则新建分组的 srcId 对不上。
-  const saved = findSavedForGroup(g)
-  if (saved) saved.srcId = g.id
-  const knownInSaved = !!saved?.snapshot.tabs.some((t) => t.id === entry.tabId)
-  const tab = makeTab(g, {
-    id: entry.tabId,
-    name: entry.tabName,
-    sessions: entry.sessions,
-    activeSessionId: entry.activeSessionId,
-    autoLaunchCC: entry.autoLaunchCC,
-    memo: entry.memo,
-    dirty: !knownInSaved
-  })
-  if (knownInSaved) autoSyncTabToSaved(tab, g)
-  activeTabId = tab.id
-  refreshUI()
-  activateUI(tab.id)
-  await spawnTabPty(tab)
-  scheduleSave()
+  await op({ op: 'reopenTab', id: entry.tabId })
+  const rec = tabRec(entry.tabId)
+  const g = rec ? liveGroup(rec.groupId) : null
+  if (!rec || !g) return
+  await openNewTab(mountTab(g, rec))
   toast(t('已从历史恢复「{0}」', entry.tabName))
 }
 
@@ -2115,18 +1099,10 @@ export function moveTabWithinGroup(tabId: string, targetTabId: string, before: b
   const src = findTab(tabId)
   const dst = findTab(targetTabId)
   if (!src || !dst || src.group !== dst.group) return
-  const tabs = src.group.tabs
-  const fromIdx = tabs.indexOf(src.tab)
-  if (fromIdx < 0) return
-  tabs.splice(fromIdx, 1)
-  let toIdx = tabs.indexOf(dst.tab)
-  if (toIdx < 0) {
-    tabs.splice(fromIdx, 0, src.tab) // 还原
-    return
-  }
-  if (!before) toIdx += 1
-  tabs.splice(toIdx, 0, src.tab)
-  refreshUI()
+  const ids = src.group.tabs.map((x) => x.id).filter((x) => x !== tabId)
+  const toIdx = ids.indexOf(targetTabId) + (before ? 0 : 1)
+  ids.splice(toIdx, 0, tabId)
+  void op({ op: 'reorderTabs', groupId: src.group.id, ids })
 }
 
 export async function preBoot(): Promise<void> {
@@ -2137,69 +1113,28 @@ export async function preBoot(): Promise<void> {
   document.body.classList.add(window.term.platform === 'darwin' ? 'platform-mac' : 'platform-win')
 }
 
-// saved 数据从磁盘整载（覆盖式）：启动时用，其他窗口落盘广播后也用它刷新本窗口副本。
-async function hydrateSavedFromDisk(): Promise<void> {
-  const ws = await window.term.loadWorkspace()
-  savedGroups.splice(0, savedGroups.length)
-  for (const s of ws.savedGroups) {
-    savedGroups.push({
-      id: s.id,
-      name: s.name,
-      cwd: s.cwd,
-      savedAt: s.savedAt,
-      lastRestoredAt: s.lastRestoredAt,
-      srcId: s.srcId,
-      snapshot: {
-        name: s.snapshot.name,
-        cwd: s.snapshot.cwd,
-        tabs: s.snapshot.tabs.map((t) => ({
-          id: t.id,
-          name: t.name,
-          sessions: t.sessions,
-          activeSessionId: t.activeSessionId,
-          autoLaunchCC: t.autoLaunchCC !== false,
-          memo: t.memo,
-          savedAt: s.savedAt
-        }))
-      }
-    })
+// 启动恢复：按 store 重建上次打开的分组与标签页，并起 PTY（cc 标签按主会话 --resume）
+async function restoreOpenTabs(): Promise<void> {
+  const tabs: TerminalTab[] = []
+  for (const gr of store.groups) {
+    for (const id of gr.tabIds) {
+      const rec = tabRec(id)
+      if (!rec || rec.closedAt) continue
+      const g = liveGroup(gr.id)
+      if (g) tabs.push(mountTab(g, rec))
+    }
   }
-  // 历史数据可能有同名同路径的重复条目（之前没合并），统一收拢
-  dedupSavedByNameCwd()
-  savedWorkspaces.splice(0, savedWorkspaces.length)
-  for (const w of ws.savedWorkspaces ?? []) {
-    savedWorkspaces.push({
-      id: w.id,
-      name: w.name,
-      savedAt: w.savedAt,
-      lastRestoredAt: w.lastRestoredAt,
-      snapshot: {
-        activeTabId: w.snapshot.activeTabId ?? null,
-        groups: w.snapshot.groups.map((g) => ({
-          id: g.id,
-          name: g.name,
-          cwd: g.cwd,
-          tabs: g.tabs.map((t) => ({
-            id: t.id,
-            name: t.name,
-            sessions: t.sessions,
-            activeSessionId: t.activeSessionId,
-            autoLaunchCC: t.autoLaunchCC !== false,
-            memo: t.memo,
-            savedAt: w.savedAt
-          }))
-        }))
-      }
-    })
-  }
-  // live 分组与 saved 的绑定重建：磁盘数据覆盖后 srcId 可能对不上本窗口的 live 分组
-  for (const g of groups) {
-    const saved = savedGroups.find((s) => s.name === g.name && s.cwd === g.cwd)
-    if (saved && !findGroup(saved.srcId ?? '')) saved.srcId = g.id
-  }
+  if (tabs.length === 0) return
+  const want = store.activeTabId && tabs.some((x) => x.id === store.activeTabId) ? store.activeTabId : tabs[0].id
+  activeTabId = want
+  activateUI(want)
+  // 当前标签先起，其余分批跟上
+  const first = tabs.find((x) => x.id === want)!
+  await spawnTabPty(first)
+  await spawnTabsBatched(tabs.filter((x) => x !== first))
 }
 
-// initApp：组件树挂载后跑一次。只读 saved 数据，live 分组不恢复——启动即空状态。
+// initApp：组件树挂载后跑一次。
 export async function initApp(): Promise<void> {
   await hostsReady
 
@@ -2211,50 +1146,19 @@ export async function initApp(): Promise<void> {
     for (const g of groups) for (const t of g.tabs) if (t.ptyId === id) return t.handlePtyExit(exitCode)
   })
 
-  // ─── 会话事件压栈 ───────────────────────────────────────────────
-  // resume 会让旧 sessionId 再发 SessionStart：按 sessionId 去重，命中只切激活
+  // ─── store 快照（会话栈由主进程按会话事件维护后推过来） ───────────
+  const offStore = window.term.onStoreChanged((snap) => applySnapshot(snap))
+
+  // ─── 会话事件：只做渲染层收尾 ─────────────────────────────────────
   const offSession = window.term.onSessionEvent((ev) => {
     // cc 已起来 → 提前释放启动闸门坑位（晚于兜底超时到达则为 no-op）
     ccGateRelease(ev.tabId)
     const ctx = findTab(ev.tabId)
     if (!ctx) return
-    const { tab } = ctx
     // SessionStart 到达即 cc 刚起了会话 → 标记活跃。cc 退出后由 onShellCommand 翻回 false。
-    tab.ccActive = true
-    // 清掉历史累积的同 id 重复条目（早期版本无去重）
-    if (tab.sessions.length > 1) {
-      const seen = new Set<string>()
-      tab.sessions = tab.sessions.filter((s) => {
-        if (seen.has(s.sessionId)) return false
-        seen.add(s.sessionId)
-        return true
-      })
-    }
-    const existedIdx = tab.sessions.findIndex((s) => s.sessionId === ev.sessionId)
-    if (existedIdx >= 0) {
-      const [existed] = tab.sessions.splice(existedIdx, 1)
-      if (ev.ts && (!existed.lastTs || ev.ts > existed.lastTs)) existed.lastTs = ev.ts
-      // resume 旧会话挪到数组末尾（栈顶），反映"最近活跃"次序
-      tab.sessions.push(existed)
-      tab.activeSessionId = ev.sessionId
-      autoSyncTabToSaved(tab, ctx.group)
-      scheduleSave()
-      refreshUI()
-      recordTabHistory(tab, ctx.group.name, true)
-      return
-    }
-    tab.sessions.push({
-      sessionId: ev.sessionId,
-      source: ev.source,
-      createdAt: ev.ts || new Date().toISOString()
-    })
-    tab.activeSessionId = ev.sessionId
-    // 栈内新增（/clear、/new、resume）不打 dirty；若 group 已保存，静默同步到快照
-    autoSyncTabToSaved(tab, ctx.group)
-    scheduleSave()
+    ctx.tab.ccActive = true
     refreshUI()
-    void refreshSessionMeta(tab)
-    recordTabHistory(tab, ctx.group.name, true)
+    void refreshSessionMeta(ctx.tab)
   })
 
   // ─── 状态徽标事件 ───────────────────────────────────────────────
@@ -2266,7 +1170,6 @@ export async function initApp(): Promise<void> {
       ctx.tab.status = 'error'
       ctx.tab.note = errorNote(ev.errorKind, ev.message)
       if (ev.tabId === downgradeTabId) clearDowngradeTimer()
-      scheduleSave()
       refreshUI()
       return
     }
@@ -2280,7 +1183,6 @@ export async function initApp(): Promise<void> {
     // 状态变了 → 重置该 tab 之前未触发的降级；若仍是当前 tab 且新态需降级，重启倒计时
     if (ev.tabId === downgradeTabId) clearDowngradeTimer()
     if (activeTabId === ev.tabId) maybeStartDowngrade(ev.tabId, ev.state)
-    scheduleSave()
     refreshUI()
   })
 
@@ -2291,14 +1193,6 @@ export async function initApp(): Promise<void> {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       closeSearchOverlay()
-    }
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 's' || e.key === 'S')) {
-      // 输入框 / 行内改名里不抢 Ctrl+S
-      const t = e.target as HTMLElement
-      if (!(t instanceof HTMLInputElement) && !t.closest?.('[contenteditable="true"]')) {
-        e.preventDefault()
-        saveActiveDirtyGroup()
-      }
     }
     // Ctrl+F 兜底：终端聚焦时由 TerminalTab 键处理器开搜索，这里补焦点在侧栏等处的情况
     if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'F')) {
@@ -2321,6 +1215,7 @@ export async function initApp(): Promise<void> {
   window.addEventListener('beforeunload', () => {
     offData()
     offExit()
+    offStore()
     offSession()
     offState()
     for (const g of groups) for (const t of g.tabs) t.dispose()
@@ -2328,30 +1223,20 @@ export async function initApp(): Promise<void> {
 
   window.term.onWindowCloseRequest(() => {
     if (isConfirmOpen()) return // 已有确认弹窗在显示，忽略重复触发
-    const dirtyGroups = groups.filter((g) => isGroupDirty(g) && g.tabs.length > 0)
-    const showDirty = dirtyGroups.length > 0
-    if (showDirty) {
-      const lines = dirtyGroups
-        .map((g) => t('• <b>{0}</b>（{1} 个标签）', escapeHtml(g.name), g.tabs.length))
-        .join('<br/>')
-      confirmDialog({
-        title: t('有未保存的分组，仍要关闭？'),
-        message: t('以下分组未保存，关闭后将丢失标签布局：<br/>{0}<br/><br/>可先在分组右键「保存分组」，或直接关闭。', lines),
-        okLabel: t('仍然关闭'),
-        onOk: () => window.term.winConfirmClose()
-      })
-      return
-    }
+    const busy = busyCountOf(groups.flatMap((g) => g.tabs))
     confirmDialog({
       title: t('确认关闭 Claude Terminal？'),
-      message: t('关闭后所有终端会话将被终止。确认继续？'),
+      message: busy > 0
+        ? t('其中 <b>{0}</b> 个标签正在运行或待决策，关闭会立即中断。', busy)
+        : t('打开的标签页下次启动时自动恢复。'),
       okLabel: t('关闭'),
       onOk: () => window.term.winConfirmClose()
     })
   })
 
   // ─── 启动恢复 ───────────────────────────────────────────────────
-  await hydrateSavedFromDisk()
+  applySnapshot(await window.term.storeLoad())
+  await restoreOpenTabs()
   refreshUI()
   window.term.floaterSetEnabled(settings.showFloater)
   if (settings.showFloater) pushFloaterCounts()

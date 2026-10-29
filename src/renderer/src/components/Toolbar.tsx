@@ -5,7 +5,6 @@ import {
   getGroupViews,
   getActiveTabId,
   getSettings,
-  isCcTab,
   activateTab,
   closeTab,
   renameTab,
@@ -19,7 +18,7 @@ import {
   moveTabWithinGroup,
   setTabDragData
 } from '../controller'
-import { openSettings, openSavedManager, showMemoTip, hideMemoTip } from '../state/overlays'
+import { openSettings, showMemoTip, hideMemoTip } from '../state/overlays'
 import { formatTs, midEllipsis, sessionTitle, srcLabel, statusLabel } from '../lib/format'
 import { icon } from '../svg-icons'
 import { t } from '../i18n'
@@ -193,8 +192,6 @@ export function Toolbar() {
             groups.flatMap((g) =>
               g.tabs.map((tb) => {
                 const cst = (tb.status ?? 'idle') as TabStatus
-                // dirty 点与 isGroupDirty 过滤条件对齐：纯 pwsh tab 不显示
-                const showDirty = tb.dirty && isCcTab(tb)
                 const dotTitle = tb.note ? t('{0}：{1}', statusLabel(cst), tb.note) : statusLabel(cst)
                 return (
                   <div
@@ -278,7 +275,6 @@ export function Toolbar() {
                     )}
                     <span className={`st-dot st-${cst}`} title={dotTitle}></span>
                     <span className="tabchip-name">{tb.name}</span>
-                    {showDirty && <span className="trow-dirty" title={t('有未保存改动')}></span>}
                     <span
                       className="tabchip-close"
                       data-close={tb.id}
@@ -325,19 +321,6 @@ export function Toolbar() {
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 7v5l3 2" />
-              </svg>
-            </button>
-            <button
-              className="tool-icon-btn"
-              type="button"
-              title={t('分组 / 工作区管理')}
-              aria-label={t('分组 / 工作区管理')}
-              onClick={() => openSavedManager('groups')}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m12 2 10 5-10 5L2 7z" />
-                <path d="m2 12 10 5 10-5" />
-                <path d="m2 17 10 5 10-5" />
               </svg>
             </button>
             <button
@@ -415,20 +398,6 @@ export function Toolbar() {
             </svg>
           </span>
         </div>
-        {/* 顶栏「分组/工作区管理」按钮，显隐由 CSS 控制 */}
-        <button
-          className="tool-icon-btn"
-          id="manageTopBtn"
-          title={t('分组 / 工作区管理')}
-          aria-label={t('分组 / 工作区管理')}
-          onClick={() => openSavedManager('groups')}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m12 2 10 5-10 5L2 7z" />
-            <path d="m2 12 10 5 10-5" />
-            <path d="m2 17 10 5 10-5" />
-          </svg>
-        </button>
         <button
           className="tool-icon-btn"
           id="settingsBtn"

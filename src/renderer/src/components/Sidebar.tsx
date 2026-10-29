@@ -1,4 +1,4 @@
-// 侧边栏：工作区分组列表 + 已保存快捷区 + 用量面板 + 拉条与收起把手。
+// 侧边栏：工作区分组列表 + 拉条与收起把手。
 // 数据全部来自 controller 的 getter，靠 useAppStore 的 rev 驱动重渲染。
 import { useRef, useState } from 'react'
 import type {
@@ -7,7 +7,7 @@ import type {
   MouseEvent as RMouseEvent
 } from 'react'
 import { useAppStore } from '../state/store'
-import { openHistory, openSavedManager, showMemoTip, hideMemoTip } from '../state/overlays'
+import { openHistory, showMemoTip, hideMemoTip } from '../state/overlays'
 import { statusLabel, statusShort } from '../lib/format'
 import { icon } from '../svg-icons'
 import { t } from '../i18n'
@@ -16,8 +16,6 @@ import type { TerminalTab } from '../terminal-tab'
 import type { TabStatus } from '../ui-helpers-types'
 import {
   getGroupViews,
-  getSavedViews,
-  getSavedWorkspaceViews,
   getActiveTabId,
   getSettings,
   updateSettings,
@@ -32,12 +30,9 @@ import {
   openGroupCtx,
   openTabCtx,
   openTabMemoEditor,
-  openWorkspacePaneCtx,
   promptNewTabInGroup,
   newGroup,
   reorderGroups,
-  openRestoreSelect,
-  restoreSavedWorkspace,
   locateActiveTab,
   moveTabWithinGroup,
   setTabDragData
@@ -63,23 +58,19 @@ export function Sidebar() {
   const groups = getGroupViews()
   const activeTabId = getActiveTabId()
 
-  // 底部区当前展示：已保存分组 / 已保存工作区（不持久化）
-  const [savedView, setSavedView] = useState<'groups' | 'workspaces'>('groups')
   // 行内重命名中的 tabId
   const [renamingTab, setRenamingTab] = useState<string | null>(null)
   // 分组拖动排序：正在拖的分组 id + 落点标记
   const [dragGroupId, setDragGroupId] = useState<string | null>(null)
   const [dropMark, setDropMark] = useState<{ id: string; before: boolean } | null>(null)
   const dragIdRef = useRef<string | null>(null)
-  // 同分组内标签拖动排序；跨窗口拖入的标签 ref 为 null，自然落到容器级的迁移 drop
+  // 同分组内标签拖动排序
   const dragTabRef = useRef<{ tabId: string; groupId: string } | null>(null)
   const [dragTabId, setDragTabId] = useState<string | null>(null)
   const [tabDropMark, setTabDropMark] = useState<{ id: string; before: boolean } | null>(null)
 
   const sidebarRef = useRef<HTMLElement | null>(null)
-  const savedSectionRef = useRef<HTMLElement | null>(null)
   const sidebarResizerRef = useRef<HTMLDivElement | null>(null)
-  const savedResizerRef = useRef<HTMLDivElement | null>(null)
 
   // 重命名会话期临时值：旧名 / 是否已提交（防 Enter 后 blur 二次提交）
   const renameOldRef = useRef('')
@@ -185,37 +176,6 @@ export function Sidebar() {
     window.addEventListener('mouseup', onUp)
   }
 
-  // 已保存 ↔ 打开 之间的水平拉条：调 .side-saved 高度
-  const onSavedResizerDown = (e: RMouseEvent<HTMLDivElement>): void => {
-    const s = getSettings()
-    if (s.savedCollapsed || s.sidebarCollapsed) return
-    e.preventDefault()
-    document.body.classList.add('row-resizing')
-    const resizer = savedResizerRef.current
-    resizer?.classList.add('dragging')
-    const startY = e.clientY
-    const startH = savedSectionRef.current?.getBoundingClientRect().height ?? 0
-    const sidebarH = sidebarRef.current?.getBoundingClientRect().height ?? 0
-    // 留 100px 给「打开的分组」，避免被挤没
-    const minH = 80
-    const maxH = Math.max(minH, sidebarH - 100)
-    const onMove = (ev: MouseEvent): void => {
-      const dy = startY - ev.clientY
-      const h = Math.max(minH, Math.min(maxH, Math.round(startH + dy)))
-      patchSettingsLive({ sidebarSavedHeight: h })
-      document.documentElement.style.setProperty('--saved-h', `${h}px`)
-    }
-    const onUp = (): void => {
-      document.body.classList.remove('row-resizing')
-      resizer?.classList.remove('dragging')
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-      persistSettings()
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }
-
   // 展开/收起全部共用一个按钮
   const allCollapsed = groups.length > 0 && groups.every((g) => g.collapsed)
   const toggleAllLabel = allCollapsed ? t('展开全部分组') : t('收起全部分组')
@@ -226,8 +186,6 @@ export function Sidebar() {
     const badgeText = isIdle ? t('{0}会话', tab.sessions.length) : statusShort(st)
     const badgeCls = isIdle ? '' : ` bs-${st}`
     const dotTitle = tab.note ? t('{0}：{1}', statusLabel(st), tab.note) : statusLabel(st)
-    // dirty 点与 isGroupDirty 过滤条件对齐：纯 pwsh tab 没数据可保存，不显示
-    const showDirty = tab.dirty && (tab.autoLaunchCC || tab.sessions.length > 0)
     const renaming = renamingTab === tab.id
     return (
       <div
@@ -349,7 +307,6 @@ export function Sidebar() {
             {tab.name}
           </span>
         )}
-        {showDirty && <span className="trow-dirty" title={t('有未保存改动')}></span>}
         <span className={'trow-badge' + badgeCls}>{badgeText}</span>
         <span className="trow-actions">
           <span
@@ -370,7 +327,6 @@ export function Sidebar() {
   const renderGroup = (g: GroupView) => {
     const gs = groupStatus(g)
     const cwdTitle = g.cwd ? g.cwd : t('使用用户主目录')
-    const folderTitle = g.dirty ? t('有未保存的改动，右键「保存分组」') : ''
     const markCls =
       dropMark && dropMark.id === g.id ? (dropMark.before ? ' drop-before' : ' drop-after') : ''
     return (
@@ -400,11 +356,7 @@ export function Sidebar() {
             className="group-caret"
             dangerouslySetInnerHTML={{ __html: icon('chevron-down', { size: 12, stroke: 2.4 }) }}
           />
-          <span
-            className={'group-folder' + (g.dirty ? ' is-dirty' : '')}
-            title={folderTitle}
-            dangerouslySetInnerHTML={{ __html: g.dirty ? icon('folder-filled') : icon('folder') }}
-          />
+          <span className="group-folder" dangerouslySetInnerHTML={{ __html: icon('folder') }} />
           <div className="group-meta">
             <div className="group-name">{g.name}</div>
             <div className="group-path" title={cwdTitle}>
@@ -447,68 +399,10 @@ export function Sidebar() {
     )
   }
 
-  const renderSavedList = () => {
-    if (savedView === 'workspaces') {
-      const workspaces = getSavedWorkspaceViews()
-      if (workspaces.length === 0) {
-        return <div className="side-empty">{t('上方「工作区」区空白处右键「保存该工作区」。')}</div>
-      }
-      // saved 行无右键菜单，左键即恢复
-      return workspaces.map((w) => (
-        <div
-          key={w.id}
-          className="saved-row"
-          data-saved-ws={w.id}
-          onClick={() => void restoreSavedWorkspace(w.id)}
-        >
-          <div className="saved-ic saved-ic-ws" dangerouslySetInnerHTML={{ __html: icon('layers') }} />
-          <div className="saved-meta">
-            <div className="saved-name">{w.name}</div>
-            <div className="saved-sub">
-              {t('{0} 个分组', w.groupCount)}
-              {' · '}
-              {t('{0} 个标签', w.tabCount)}
-              {' · '}
-              {w.savedAt}
-            </div>
-          </div>
-        </div>
-      ))
-    }
-    const saved = getSavedViews()
-    if (saved.length === 0) {
-      return <div className="side-empty">{t('右键分组「保存分组」可在此一键恢复。')}</div>
-    }
-    return saved.map((s) => (
-      <div key={s.id} className="saved-row" data-saved={s.id} onClick={() => openRestoreSelect(s.id)}>
-        <div className="saved-ic" dangerouslySetInnerHTML={{ __html: icon('rotate-ccw') }} />
-        <div className="saved-meta">
-          <div className="saved-name">{s.name}</div>
-          <div className="saved-sub">
-            {t('{0} 个标签', s.tabCount)}
-            {' · '}
-            {s.cwd ? s.cwd : <span className="path-placeholder">{t('(默认目录)')}</span>}
-            {' · '}
-            {s.savedAt}
-          </div>
-        </div>
-      </div>
-    ))
-  }
-
   return (
     <>
       <aside className={'sidebar' + (settings.sidebarCollapsed ? ' collapsed' : '')} id="sidebar" ref={sidebarRef}>
-        <section
-          className="side-section side-open"
-          onContextMenu={(e) => {
-            // 右键命中分组头/标签行时交给行级菜单，其余弹「保存该工作区」
-            const tgt = e.target as HTMLElement
-            if (tgt.closest('[data-t]') || tgt.closest('[data-g]')) return
-            e.preventDefault()
-            openWorkspacePaneCtx(e.clientX, e.clientY)
-          }}
-        >
+        <section className="side-section side-open">
           <div className="side-section-label">
             {t('工作区')}
             <span className="line"></span>
@@ -624,9 +518,7 @@ export function Sidebar() {
               </svg>
             </button>
           </div>
-          <div
-            className="side-open-scroll"
-          >
+          <div className="side-open-scroll">
             <div id="groupList">
               {groups.length === 0 ? (
                 <div className="side-empty">{t('工作区为空')}</div>
@@ -634,96 +526,6 @@ export function Sidebar() {
                 groups.map((g) => renderGroup(g))
               )}
             </div>
-          </div>
-        </section>
-
-        {/* 横向拉条调整「已保存」区高度；折叠态 .disabled 禁用避免误拖 */}
-        <div
-          id="savedResizer"
-          ref={savedResizerRef}
-          className={'saved-resizer' + (settings.savedCollapsed ? ' disabled' : '')}
-          title={t('拖动调整已保存区高度')}
-          aria-hidden="true"
-          onMouseDown={onSavedResizerDown}
-        ></div>
-
-        {/* 已保存区：分组与工作区分开展示，管理入口进弹窗 */}
-        <section
-          className={'side-section side-saved' + (settings.savedCollapsed ? ' collapsed' : '')}
-          id="savedSection"
-          ref={savedSectionRef}
-        >
-          <div className="side-section-label saved-head">
-            <button
-              className="saved-toggle"
-              id="savedToggle"
-              type="button"
-              title={t('收起 / 展开')}
-              onClick={() => updateSettings({ ...getSettings(), savedCollapsed: !getSettings().savedCollapsed })}
-            >
-              <span className="saved-caret">
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </span>
-            </button>
-            <span className="saved-view-switch" id="savedViewSwitch" role="tablist">
-              <button
-                className={'sv-item' + (savedView === 'groups' ? ' active' : '')}
-                data-view="groups"
-                type="button"
-                role="tab"
-                onClick={() => setSavedView('groups')}
-              >
-                {t('分组')}
-              </button>
-              <span className="sv-sep">/</span>
-              <button
-                className={'sv-item' + (savedView === 'workspaces' ? ' active' : '')}
-                data-view="workspaces"
-                type="button"
-                role="tab"
-                onClick={() => setSavedView('workspaces')}
-              >
-                {t('工作区||列表')}
-              </button>
-            </span>
-            <span className="line"></span>
-            <button
-              id="manageSavedBtn"
-              className="side-head-btn"
-              type="button"
-              title={t('管理已保存的分组/工作区')}
-              aria-label={t('展开管理')}
-              onClick={() => openSavedManager(savedView)}
-            >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-          </div>
-          <div className="side-saved-body">
-            <div id="savedList">{renderSavedList()}</div>
           </div>
         </section>
 

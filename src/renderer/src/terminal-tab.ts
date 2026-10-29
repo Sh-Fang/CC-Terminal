@@ -13,8 +13,6 @@ export interface TermTabHandlers {
   onEscapeCloseSearch?: () => boolean
   onRequestNewTab: () => void
   onRequestCloseSelf: () => void
-  // Ctrl+S：把当前脏分组保存到"已保存分组"
-  onRequestSaveGroup?: () => void
   onPtyStarted?: () => void
   // busy 中按 ESC 撤回提示词时 Claude 不发 hook，由 renderer 兜底重置
   onUserAbort?: () => void
@@ -26,7 +24,7 @@ export interface TermTabHandlers {
 
 export interface SessionRecord {
   sessionId: string
-  source: 'startup' | 'clear' | 'compact' | 'resume'
+  source: 'startup' | 'clear' | 'compact' | 'resume' | 'fork'
   createdAt: string
   userTitle?: string
   lastTs?: string
@@ -107,7 +105,6 @@ export class TerminalTab {
   note?: string
   // 用户手写的标签备注（右键添加/删除）；undefined = 没有备注，与 note（cc 报错说明）互不相干
   memo?: string
-  dirty: boolean
   // cc 进程是否活跃：SessionStart hook → true；任意 pwsh shell integration OSC → false
   // （cc 屏蔽 pwsh 序列，触发即证明 pwsh 前台）。不持久化，重启后按事件重新推导。
   ccActive: boolean = false
@@ -156,7 +153,6 @@ export class TerminalTab {
       status?: TabStatus
       note?: string
       memo?: string
-      dirty?: boolean
       settings: Settings
     },
     handlers: TermTabHandlers
@@ -170,7 +166,6 @@ export class TerminalTab {
     this.status = opts.status ?? 'idle'
     this.note = opts.note
     this.memo = opts.memo
-    this.dirty = opts.dirty ?? true
     this.handlers = handlers
 
     this.host = document.createElement('div')
@@ -291,8 +286,8 @@ export class TerminalTab {
         if (e.key === 't' || e.key === 'T') { this.handlers.onRequestNewTab(); return false }
         if (e.key === 'w' || e.key === 'W') { this.handlers.onRequestCloseSelf(); return false }
         if (e.key === 'f' || e.key === 'F') { this.handlers.openSearch(); return false }
-        // Ctrl+S：保存当前分组（顺带挡掉 XOFF，裸 \x13 会把终端"冻住"）
-        if (e.key === 's' || e.key === 'S') { this.handlers.onRequestSaveGroup?.(); return false }
+        // Ctrl+S：挡掉 XOFF，裸 \x13 会把终端"冻住"
+        if (e.key === 's' || e.key === 'S') return false
         // Ctrl+P：命令面板由 CommandPalette 处理，这里只挡住 xterm 把它译成 pty 输入
         if (e.key === 'p' || e.key === 'P') return false
         if (e.key === 'c' || e.key === 'C') {

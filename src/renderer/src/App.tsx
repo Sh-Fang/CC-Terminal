@@ -9,7 +9,6 @@ import { SearchBar } from './components/SearchBar'
 import { SessionInfoBar } from './components/SessionInfoBar'
 import { OverlayHost, ToastHost } from './components/OverlayHost'
 import { SettingsPanel } from './components/SettingsPanel'
-import { SavedManager } from './components/SavedManager'
 import { HistoryDialog } from './components/HistoryDialog'
 
 export function App() {
@@ -22,11 +21,6 @@ export function App() {
     if (s.appTheme === 'dark') document.documentElement.dataset.appTheme = 'dark'
     else delete document.documentElement.dataset.appTheme
     document.documentElement.style.setProperty('--sidebar-w', `${s.sidebarWidth}px`)
-    if (s.sidebarSavedHeight > 0) {
-      document.documentElement.style.setProperty('--saved-h', `${s.sidebarSavedHeight}px`)
-    } else {
-      document.documentElement.style.removeProperty('--saved-h')
-    }
   })
 
   const appCls = [
@@ -52,7 +46,6 @@ export function App() {
       </div>
       <OverlayHost />
       <SettingsPanel />
-      <SavedManager />
       <HistoryDialog />
     </>
   )

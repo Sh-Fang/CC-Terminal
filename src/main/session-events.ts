@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { UUID_RE } from './claude-paths'
 import { isSessionSource } from './session-constants'
 import { sendToMain } from './windows'
+import { applySessionStart } from './store'
 
 interface FileState {
   offset: number
@@ -120,6 +121,8 @@ export class SessionEventWatcher {
       cwd: typeof obj.cwd === 'string' ? obj.cwd : undefined,
       ts: typeof obj.ts === 'string' ? obj.ts : undefined
     }
+    // 先在主进程维护会话栈（会推 store:changed），再把事件交给渲染层做启动闸门等收尾
+    applySessionStart(payload)
     sendToMain('session:event', payload)
   }
 }

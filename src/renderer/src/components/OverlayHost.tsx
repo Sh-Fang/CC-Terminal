@@ -1,4 +1,4 @@
-// 浮层宿主：ctx 右键菜单 / modal 弹窗 / pickTabs 勾选弹窗 / confirm 弹窗 / 会话选择浮层，z 序由 styles.css 保证。
+// 浮层宿主：ctx 右键菜单 / modal 弹窗 / confirm 弹窗 / 备注编辑，z 序由 styles.css 保证。
 // ToastHost 单独导出：.toast 是 position:absolute（相对 .main），必须由 App 放进 .main 层级。
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as RKeyboardEvent, MouseEvent as RMouseEvent } from 'react'
@@ -6,19 +6,11 @@ import {
   useOverlays,
   closeCtxMenu,
   closeModal,
-  closePickTabs,
-  closeSessionPicker,
   closeMemoEditor,
-  openSessionPicker,
   resolveConfirm,
   type MemoEditorOpts,
-  type ModalOpts,
-  type PickItem,
-  type PickOpts,
-  type SessionPickerOpts
+  type ModalOpts
 } from '../state/overlays'
-import { escapeHtml, formatTs, srcLabel } from '../lib/format'
-import { icon } from '../svg-icons'
 import { t } from '../i18n'
 
 // scrim 关闭手势：mousedown 与 click 都落在 scrim 自身才关闭，防止 modal 内选文字拖出被误判
@@ -287,249 +279,6 @@ function ModalDialog() {
   )
 }
 
-// action 行（id 以 '__' 开头）：不参与全选/计数，提交时照常归入 selectedIds
-function pkIsAction(it: PickItem): boolean {
-  return it.id.startsWith('__')
-}
-
-function PickBody({ cfg }: { cfg: PickOpts }) {
-  const [checked, setChecked] = useState<Record<string, boolean>>(() => {
-    const m: Record<string, boolean> = {}
-    for (const it of cfg.items) m[it.id] = it.defaultChecked !== false && !it.disabled
-    return m
-  })
-  const [inputs, setInputs] = useState<Record<string, string>>({})
-  const [toggles, setToggles] = useState<Record<string, boolean>>(() => {
-    const m: Record<string, boolean> = {}
-    for (const it of cfg.items) if (it.sideToggle) m[it.id] = it.sideToggle.defaultChecked
-    return m
-  })
-  // 每行已指定的会话（id → {sessionId, 展示标题}），key=seq 重挂即清空
-  const [sessChosen, setSessChosen] = useState<Record<string, { sid: string; title: string }>>({})
-
-  const selectedIds = cfg.items.filter((it) => !it.disabled && checked[it.id]).map((it) => it.id)
-  const totalReal = cfg.items.filter((it) => !it.disabled && !pkIsAction(it)).length
-  const curReal = selectedIds.filter((id) => !id.startsWith('__')).length
-  const curAll = selectedIds.length // ok 启用看的是总选中数（含 action 行）
-
-  const toggleAll = (): void => {
-    // 全选判定只看实条目；程序化改勾选不清 sessChosen
-    const target = curReal < totalReal
-    setChecked((prev) => {
-      const n = { ...prev }
-      for (const it of cfg.items) {
-        if (it.disabled || pkIsAction(it)) continue
-        n[it.id] = target
-      }
-      return n
-    })
-  }
-
-  const cancel = (): void => {
-    const cb = cfg.onCancel
-    closePickTabs()
-    cb?.()
-  }
-
-  const ok = (): void => {
-    if (selectedIds.length === 0) return
-    const inputsOut: Record<string, string> = {}
-    const togglesOut: Record<string, boolean> = {}
-    for (const it of cfg.items) {
-      if (it.inputPlaceholder) inputsOut[it.id] = (inputs[it.id] ?? '').trim()
-      if (it.sideToggle) togglesOut[it.id] = toggles[it.id] ?? it.sideToggle.defaultChecked
-    }
-    const cb = cfg.onOk
-    closePickTabs()
-    cb(selectedIds, inputsOut, togglesOut)
-  }
-
-  // Enter = 确认：没选任何行时 ok() 自带空守卫；按钮聚焦时交给按钮原生行为
-  const okRef = useRef(ok)
-  okRef.current = ok
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Enter') return
-      const el = e.target as HTMLElement | null
-      if (el instanceof HTMLButtonElement) return
-      okRef.current()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
-  const renderRow = (it: PickItem) => {
-    const chosen = sessChosen[it.id]
-    // meta：会话可点时渲染成徽标按钮，否则普通静态文本；只有 1 条会话时没得选，不渲染成按钮
-    const canPickSess = !!it.sessionPick && it.sessionPick.entries.length > 1
-
-    const onCheckChange = (nowChecked: boolean): void => {
-      setChecked((prev) => ({ ...prev, [it.id]: nowChecked }))
-      if (!nowChecked && canPickSess && sessChosen[it.id]) {
-        setSessChosen((prev) => {
-          const n = { ...prev }
-          delete n[it.id]
-          return n
-        })
-        it.sessionPick!.onPick(null)
-      }
-    }
-
-    const onBadgeClick = (e: RMouseEvent<HTMLButtonElement>): void => {
-      // 阻止 label 的隐式 toggle 与冒泡
-      e.preventDefault()
-      e.stopPropagation()
-      const badge = e.currentTarget
-      openSessionPicker({
-        anchor: badge,
-        entries: it.sessionPick!.entries,
-        selectedId: sessChosen[it.id]?.sid,
-        title: t('选择要恢复的会话'),
-        onPick: (sid) => {
-          const ent = it.sessionPick!.entries.find((x) => x.sessionId === sid)
-          setSessChosen((prev) => ({ ...prev, [it.id]: { sid, title: ent?.title ?? sid.slice(0, 8) } }))
-          setChecked((prev) => ({ ...prev, [it.id]: true }))
-          it.sessionPick!.onPick(sid)
-        }
-      })
-    }
-
-    const chosenFull = chosen?.title ?? ''
-    const chosenShort = chosenFull.length > 14 ? chosenFull.slice(0, 14) + '…' : chosenFull
-
-    const rowInner = (
-      <>
-        <input
-          type="checkbox"
-          data-pk-id={it.id}
-          checked={!!checked[it.id]}
-          disabled={!!it.disabled}
-          onChange={(e) => onCheckChange(e.target.checked)}
-        />
-        {it.inputPlaceholder ? (
-          <input
-            type="text"
-            className="pk-input"
-            data-pk-input-id={it.id}
-            placeholder={it.inputPlaceholder}
-            autoComplete="off"
-            spellCheck={false}
-            value={inputs[it.id] ?? ''}
-            onChange={(e) => {
-              const v = e.target.value
-              setInputs((prev) => ({ ...prev, [it.id]: v }))
-              setChecked((prev) => ({ ...prev, [it.id]: v.trim().length > 0 }))
-            }}
-          />
-        ) : (
-          <span className="pk-label">{it.label}</span>
-        )}
-        {canPickSess ? (
-          <button
-            type="button"
-            className={'pk-meta pk-sess-count' + (chosen ? ' chosen' : '')}
-            data-pk-sess-id={it.id}
-            title={chosen ? t('从「{0}」恢复', chosenFull) : t('选择要恢复的会话')}
-            onClick={onBadgeClick}
-          >
-            {chosen ? `${t('从「{0}」恢复', chosenShort)} ▾` : `${it.meta ?? ''} ▾`}
-          </button>
-        ) : it.meta ? (
-          <span className="pk-meta">{it.meta}</span>
-        ) : null}
-        {it.sideToggle ? (
-          // 阻止冒泡：外层 <label> 会对主 checkbox 做隐式 toggle
-          <label className="pk-side-toggle" title={it.sideToggle.title ?? ''} onClick={(e) => e.stopPropagation()}>
-            <input
-              type="checkbox"
-              data-pk-toggle-id={it.id}
-              checked={toggles[it.id] ?? it.sideToggle.defaultChecked}
-              onChange={(e) => {
-                const v = e.target.checked
-                setToggles((prev) => ({ ...prev, [it.id]: v }))
-              }}
-            />
-            <span>{it.sideToggle.label}</span>
-          </label>
-        ) : null}
-        {it.onDelete ? (
-          <button
-            type="button"
-            className="pk-del"
-            data-pk-del-id={it.id}
-            title={it.deleteTitle ?? t('从保存里删除')}
-            aria-label={t('删除')}
-            onClick={(e) => {
-              // 阻止 label 的隐式 toggle 与 row 的冒泡
-              e.preventDefault()
-              e.stopPropagation()
-              it.onDelete?.()
-            }}
-            dangerouslySetInnerHTML={{ __html: icon('trash', { size: 13 }) }}
-          />
-        ) : null}
-      </>
-    )
-
-    const rowClass = 'pk-row' + (it.disabled ? ' is-disabled' : '')
-    const rowAction = pkIsAction(it) ? '1' : undefined
-    // 含 inputPlaceholder 的行用 <div> 而非 <label>：点 input 会触发 label 隐式 toggle 干扰光标
-    return it.inputPlaceholder ? (
-      <div key={it.id} className={rowClass} data-row-action={rowAction}>
-        {rowInner}
-      </div>
-    ) : (
-      <label key={it.id} className={rowClass} data-row-action={rowAction}>
-        {rowInner}
-      </label>
-    )
-  }
-
-  return (
-    <div className="modal modal-pick">
-      <h2 id="pk-title">{cfg.title}</h2>
-      <p className="sub" id="pk-sub" style={cfg.sub ? undefined : { display: 'none' }}>
-        {cfg.sub ?? ''}
-      </p>
-      <div className="pk-toolbar">
-        <button id="pk-toggle-all" type="button" className="link-btn" disabled={totalReal === 0} onClick={toggleAll}>
-          {totalReal > 0 && curReal === totalReal ? t('取消全选') : t('全选')}
-        </button>
-        <span id="pk-count" className="pk-count">
-          {totalReal === 0 ? '' : t('已选 {0} / {1}', curReal, totalReal)}
-        </span>
-      </div>
-      <div id="pk-list" className="pk-list">
-        {cfg.items.map(renderRow)}
-      </div>
-      <div className="actions">
-        <button id="pk-cancel" className="btn btn-secondary" onClick={cancel}>
-          {t('取消')}
-        </button>
-        <button id="pk-ok" className="btn btn-primary" disabled={curAll === 0} onClick={ok}>
-          {cfg.okLabel ?? t('确认')}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function PickDialog() {
-  const pick = useOverlays((s) => s.pick)
-  const seq = useOverlays((s) => s.pickSeq)
-  const dismiss = useScrimDismiss(() => {
-    const cb = useOverlays.getState().pick?.onCancel
-    closePickTabs()
-    cb?.()
-  })
-  return (
-    <div id="pickScrim" className="scrim" hidden={!pick} {...dismiss}>
-      {/* key=seq：openPickTabs 重复调用就地刷新并重置勾选态 */}
-      {pick ? <PickBody key={seq} cfg={pick} /> : null}
-    </div>
-  )
-}
-
 function ConfirmDialog() {
   const cf = useOverlays((s) => s.confirm)
   const dismiss = useScrimDismiss(() => resolveConfirm(false))
@@ -613,102 +362,6 @@ function UpdateProgressDialog() {
 
 // 会话选择浮层：点「N 会话」徽标弹出的小列表，管理页与勾选弹窗两个恢复入口共用。
 // 锚定在徽标下方，越界自动上翻/内收；外部点击 / Esc / 滚动即关闭。
-function SessionPickerBody({ opts }: { opts: SessionPickerOpts }) {
-  const ref = useRef<HTMLDivElement>(null)
-
-  // 定位：锚点下方左对齐；放不下时选空间更大的一侧并把高度收进该侧可用高度
-  useLayoutEffect(() => {
-    const host = ref.current
-    if (!host) return
-    const r = opts.anchor.getBoundingClientRect()
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const MARGIN = 8
-    const GAP = 4
-    const SAFE_TOP = 40 // 标题栏 32px + 余量：浮层不越过此线
-    const spaceBelow = vh - r.bottom - GAP - MARGIN
-    const spaceAbove = r.top - GAP - MARGIN - SAFE_TOP
-    const placeBelow = spaceBelow >= spaceAbove
-    const avail = Math.max(Math.floor(placeBelow ? spaceBelow : spaceAbove), 120)
-    host.style.maxHeight = `${avail}px`
-    const pw = host.offsetWidth
-    const ph = host.offsetHeight
-    let left = r.left
-    if (left + pw > vw - MARGIN) left = Math.max(MARGIN, vw - MARGIN - pw)
-    let top = placeBelow ? r.bottom + GAP : r.top - GAP - ph
-    top = Math.max(SAFE_TOP, top)
-    host.style.left = `${Math.round(left)}px`
-    host.style.top = `${Math.round(top)}px`
-  }, [opts])
-
-  useEffect(() => {
-    const host = ref.current
-    if (!host) return
-    const onDocDown = (e: globalThis.MouseEvent): void => {
-      if (host.contains(e.target as Node) || opts.anchor.contains(e.target as Node)) return
-      closeSessionPicker()
-    }
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        closeSessionPicker()
-      }
-    }
-    const onGone = (): void => closeSessionPicker()
-    // 仅浮层外部滚动才关闭（外部滚动会让锚点移位）
-    const onScroll = (e: Event): void => {
-      if (host.contains(e.target as Node)) return
-      closeSessionPicker()
-    }
-    // 延后挂 mousedown，避免打开的这次点击立即关掉它
-    const timer = window.setTimeout(() => document.addEventListener('mousedown', onDocDown, true), 0)
-    document.addEventListener('keydown', onKey, true)
-    window.addEventListener('resize', onGone, true)
-    window.addEventListener('scroll', onScroll, true)
-    return () => {
-      window.clearTimeout(timer)
-      document.removeEventListener('mousedown', onDocDown, true)
-      document.removeEventListener('keydown', onKey, true)
-      window.removeEventListener('resize', onGone, true)
-      window.removeEventListener('scroll', onScroll, true)
-    }
-  }, [opts])
-
-  return (
-    <div className="sesspick" ref={ref}>
-      {opts.title ? <div className="sesspick-head">{opts.title}</div> : null}
-      {opts.entries.map((e) => {
-        const sel = !!opts.selectedId && e.sessionId === opts.selectedId
-        const src = srcLabel(e.source)
-        const meta = `${escapeHtml(formatTs(e.ts))}${src ? ` · <span class="src">${escapeHtml(src)}</span>` : ''} · ${escapeHtml(e.sessionId.slice(0, 8))}${e.isDefault ? ` · <span class="cur">${t('默认')}</span>` : ''}`
-        return (
-          <div
-            key={e.sessionId}
-            className={`sesspick-item sess-item${e.isDefault ? ' current' : ''}${sel ? ' selected' : ''}`}
-            onClick={() => {
-              closeSessionPicker()
-              opts.onPick(e.sessionId)
-            }}
-          >
-            <span className="sdot"></span>
-            <div className="sess-body">
-              <div className="sess-title">{e.title}</div>
-              <div className="sess-meta" dangerouslySetInnerHTML={{ __html: meta }} />
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function SessionPicker() {
-  const sp = useOverlays((s) => s.sessPick)
-  return sp ? <SessionPickerBody opts={sp} /> : null
-}
-
-// 标签备注编辑弹窗：只有一块可输入文本的圆角便签，没有标题和按钮。
-// 点外部 / Esc 关闭；卸载（关闭或被另一次 open 覆盖）时把最新文本交回 onSave。
 function MemoEditorBody({ opts }: { opts: MemoEditorOpts }) {
   const ref = useRef<HTMLDivElement>(null)
   const textRef = useRef(opts.text)
@@ -825,10 +478,8 @@ export function OverlayHost() {
     <>
       <CtxMenu />
       <ModalDialog />
-      <PickDialog />
       <ConfirmDialog />
       <UpdateProgressDialog />
-      <SessionPicker />
       <MemoEditor />
       <MemoTip />
     </>

@@ -1,4 +1,4 @@
-// 标签历史弹窗：数据源为主进程 tabHistoryList()（已按 lastSeenAt 倒序），
+// 标签历史弹窗：数据源为 store 里近 7 天关闭的标签页（已按关闭时间倒序），
 // 按 今天/昨天/更早 切桶；点行恢复成 live tab，开合订阅 overlays store。
 
 import { useEffect, useRef, useState } from 'react'
@@ -7,7 +7,7 @@ import { icon } from '../svg-icons'
 import { t } from '../i18n'
 import { useOverlays, closeHistory, confirmDialog, showMemoTip, hideMemoTip } from '../state/overlays'
 import { escapeHtml, formatTs, shortPath, fuzzySearch, highlightRanges, type Range } from '../lib/format'
-import { restoreFromHistory } from '../controller'
+import { deleteHistoryEntries, getHistoryEntries, restoreFromHistory } from '../controller'
 import type { HistoryEntry } from '../app-types'
 
 type Bucket = 'today' | 'yesterday' | 'earlier'
@@ -61,11 +61,11 @@ export function HistoryDialog() {
     let alive = true
     setSearchQuery('')
     searchRef.current?.focus()
-    void window.term.tabHistoryList().then((list) => {
-      if (!alive) return
+    const list = getHistoryEntries()
+    if (alive) {
       setEntries(list)
       setActiveBucket(firstNonEmptyBucket(regroup(list)) ?? 'today')
-    })
+    }
     return () => {
       alive = false
     }
@@ -73,7 +73,7 @@ export function HistoryDialog() {
 
   // 删除/清空后重拉；active 桶被删空就跳到第一个非空桶
   const refresh = async (): Promise<void> => {
-    const list = await window.term.tabHistoryList()
+    const list = getHistoryEntries()
     setEntries(list)
     const g = regroup(list)
     setActiveBucket((prev) => (g[prev].length === 0 ? (firstNonEmptyBucket(g) ?? prev) : prev))
@@ -139,7 +139,7 @@ export function HistoryDialog() {
       message: t('将从历史里删除「<b>{0}</b>」，已打开的标签不受影响。', `${escapeHtml(entry.groupName)} · ${escapeHtml(entry.tabName)}`),
       okLabel: t('删除'),
       onOk: async () => {
-        await window.term.tabHistoryDelete(entry.tabId)
+        await deleteHistoryEntries([entry.tabId])
         await refresh()
       }
     })
@@ -155,7 +155,7 @@ export function HistoryDialog() {
       message: t('将清空<b>{0}</b>的 <b>{1}</b> 条历史记录，已打开的标签不受影响。', bucketLabel, ids.length),
       okLabel: t('清空'),
       onOk: async () => {
-        await window.term.tabHistoryDeleteMany(ids)
+        await deleteHistoryEntries(ids)
         await refresh()
       }
     })

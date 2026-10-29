@@ -3,7 +3,7 @@ import { existsSync, statSync } from 'node:fs'
 import { request as httpsRequest } from 'node:https'
 import { request as httpRequest } from 'node:http'
 import { createPty, killPty, killPtyAndWait, resizePty, writePty } from './pty-manager'
-import { loadWorkspace, saveWorkspace, type Workspace } from './workspace'
+import { applyOp, setStoreChangeListener, snapshot, type StoreOp } from './store'
 import { detectClaudePath, isClaudeAvailable, sessionExists } from './claude-helper'
 import {
   cancelInstall as ccCancelInstall,
@@ -35,15 +35,6 @@ import {
 } from './update-check'
 import type { UpdateActionResult } from '../shared/update'
 import { t } from './i18n'
-import {
-  clearTabHistory,
-  deleteManyTabHistory,
-  deleteTabHistory,
-  listTabHistory,
-  upsertTabHistory,
-  upsertManyTabHistory,
-  type HistoryEntry
-} from './tab-history'
 import { moveFloaterTo, pushCountsToFloater, setFloaterDragging, setFloaterEnabled, setFloaterFocusable } from './floater'
 import { sendToMain } from './windows'
 
@@ -116,11 +107,10 @@ export function registerPtyIpc(
     return err ? { ok: false, error: err } : { ok: true }
   })
 
-  ipcMain.handle('workspace:load', () => loadWorkspace())
-  ipcMain.handle('workspace:save', (_e, ws: Workspace) => {
-    saveWorkspace(ws)
-    return true
-  })
+  // 唯一数据源：渲染层读快照、发写操作；任何变更（含主进程处理会话事件）都推 store:changed
+  setStoreChangeListener((snap) => sendToMain('store:changed', snap))
+  ipcMain.handle('store:load', () => snapshot())
+  ipcMain.handle('store:op', (_e, o: StoreOp) => applyOp(o))
 
   ipcMain.handle('settings:load', () => loadSettings())
   ipcMain.handle('settings:save', (_e, s: unknown) => saveSettings(s))
@@ -357,28 +347,6 @@ export function registerPtyIpc(
     ptyDbgLog(`killWait id=${p?.id}`)
     if (!p || !Number.isInteger(p.id)) return false
     await killPtyAndWait(p.id)
-    return true
-  })
-
-  ipcMain.handle('tabHistory:list', () => listTabHistory())
-  ipcMain.handle('tabHistory:upsert', (_e, entry: HistoryEntry) => {
-    upsertTabHistory(entry)
-    return true
-  })
-  ipcMain.handle('tabHistory:upsertMany', (_e, entries: HistoryEntry[]) => {
-    upsertManyTabHistory(entries)
-    return true
-  })
-  ipcMain.handle('tabHistory:delete', (_e, tabId: string) => {
-    deleteTabHistory(tabId)
-    return true
-  })
-  ipcMain.handle('tabHistory:deleteMany', (_e, tabIds: string[]) => {
-    deleteManyTabHistory(tabIds)
-    return true
-  })
-  ipcMain.handle('tabHistory:clear', () => {
-    clearTabHistory()
     return true
   })
 

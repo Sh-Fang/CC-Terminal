@@ -38,8 +38,6 @@ export interface Settings {
   lastUsedCwd: string  // 最近一次新建分组选择的 cwd，下次预填用
   sidebarWidth: number
   sidebarCollapsed: boolean
-  savedCollapsed: boolean  // 「已保存的分组」区是否折叠到底部
-  sidebarSavedHeight: number  // 「已保存的分组」区的像素高度（0 = 用 CSS 默认 40%）
   statusDowngradeSec: number   // done/attention 停留多少秒后降回 idle（1~10）
   closeBehavior: CloseBehavior // 点关闭按钮：quit = 二次确认后退出（默认）；tray = 不确认，收进托盘
   showFloater: boolean         // 开启常驻悬浮窗（显示待查看 / 待决策 / 运行中 数）
@@ -68,8 +66,6 @@ export const DEFAULT_SETTINGS: Settings = {
   lastUsedCwd: '',
   sidebarWidth: 268,
   sidebarCollapsed: false,
-  savedCollapsed: false,
-  sidebarSavedHeight: 0,
   statusDowngradeSec: 5,
   closeBehavior: 'quit',
   showFloater: false,
@@ -153,8 +149,6 @@ function normalize(raw: unknown): Settings {
     lastUsedCwd: typeof r.lastUsedCwd === 'string' ? r.lastUsedCwd : DEFAULT_SETTINGS.lastUsedCwd,
     sidebarWidth: clampNum(r.sidebarWidth, 180, 520, DEFAULT_SETTINGS.sidebarWidth),
     sidebarCollapsed: typeof r.sidebarCollapsed === 'boolean' ? r.sidebarCollapsed : DEFAULT_SETTINGS.sidebarCollapsed,
-    savedCollapsed: typeof r.savedCollapsed === 'boolean' ? r.savedCollapsed : DEFAULT_SETTINGS.savedCollapsed,
-    sidebarSavedHeight: clampNum(r.sidebarSavedHeight, 0, 4000, DEFAULT_SETTINGS.sidebarSavedHeight),
     statusDowngradeSec: clampNum(r.statusDowngradeSec, 1, 10, DEFAULT_SETTINGS.statusDowngradeSec),
     closeBehavior: pick(r.closeBehavior, CLOSE_BEHAVIORS, DEFAULT_SETTINGS.closeBehavior),
     showFloater:

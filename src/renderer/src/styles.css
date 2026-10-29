@@ -78,9 +78,7 @@
 :root[data-app-theme='dark'] .cc-ver-hint.ok { color: #98c379; }
 /* 深色下拖动条 / 分隔线：hover 提示线压暗一档，避免在暗底上显得刺眼 */
 :root[data-app-theme='dark'] .sidebar-resizer:hover::after,
-:root[data-app-theme='dark'] .sidebar-resizer.dragging::after,
-:root[data-app-theme='dark'] .saved-resizer:hover::after,
-:root[data-app-theme='dark'] .saved-resizer.dragging::after { background: var(--hairline); }
+:root[data-app-theme='dark'] .sidebar-resizer.dragging::after { background: var(--hairline); }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
@@ -276,56 +274,6 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 }
 .side-open-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
-.side-saved {
-  flex: 0 0 auto;
-  border-top: 1px solid var(--hairline);
-  /* 高度由 --saved-h 控制；默认 40%，最小 80px 留得下一行半，最多吃到 sidebar 90% 上限 */
-  height: var(--saved-h, 40%);
-  min-height: 80px;
-  max-height: 90%;
-}
-.side-saved-body {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-  padding: 0 8px 8px;
-}
-.side-saved-body[hidden] { display: none; }
-.side-saved-body::-webkit-scrollbar { width: 0; height: 0; display: none; }
-/* 折叠态：盖掉 height/min/max，只显标题行 */
-.side-saved.collapsed {
-  height: auto;
-  min-height: 0;
-  max-height: none;
-}
-.side-saved.collapsed .side-saved-body { display: none; }
-
-/* 已保存区上方的水平拖拽条；折叠态隐藏 */
-.saved-resizer {
-  flex: 0 0 6px;
-  height: 6px;
-  margin: -3px 0;
-  cursor: row-resize;
-  z-index: 5;
-  position: relative;
-  background: transparent;
-}
-.saved-resizer::after {
-  content: '';
-  position: absolute;
-  left: 0; right: 0;
-  top: 50%;
-  height: 1px;
-  transform: translateY(-50%);
-  background: transparent;
-  transition: background 0.15s;
-}
-.saved-resizer:hover::after,
-.saved-resizer.dragging::after { background: var(--hairline-strong); }
-.saved-resizer.disabled { pointer-events: none; opacity: 0; }
-body.row-resizing,
-body.row-resizing * { cursor: row-resize !important; user-select: none !important; }
-
 .side-section-label {
   font-family: var(--mono);
   font-size: 10px;
@@ -342,49 +290,6 @@ body.row-resizing * { cursor: row-resize !important; user-select: none !importan
 .side-section-label .line { flex: 1 1 0; min-width: 0; height: 1px; background: var(--hairline); }
 
 /* 已保存区标题：整行可点折叠 */
-/* saved-head 行：折叠按钮 + line + 管理按钮，与 .side-section-label 同款排版 */
-button.saved-toggle {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: color 0.12s;
-}
-button.saved-toggle:hover { color: var(--ink); }
-.saved-caret { display: inline-grid; place-items: center; transition: transform 0.15s; }
-.side-saved.collapsed .saved-caret { transform: rotate(-90deg); }
-
-/* 头部「分组 / 工作区」小切换：沿用区标题的 mono 小字风格，激活项 ink 加重。
-   translateZ(0) 提升合成层 → 强制灰度抗锯齿：Windows ClearType 对 10px 加粗
-   等宽字会留红蓝次像素彩边，看起来像"发绿"，灰度渲染后是纯净的黑。 */
-.saved-view-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  flex: 0 0 auto;
-  transform: translateZ(0);
-}
-.saved-view-switch .sv-item {
-  border: none;
-  background: transparent;
-  padding: 0 1px;
-  cursor: pointer;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  color: var(--mute);
-  transition: color 0.12s;
-}
-.saved-view-switch .sv-item:hover { color: var(--body); }
-.saved-view-switch .sv-item.active { color: var(--ink); font-weight: 600; }
-.saved-view-switch .sv-sep { color: var(--mute); opacity: 0.6; }
 
 /* Group */
 .group { margin-bottom: 2px; position: relative; }
@@ -414,7 +319,6 @@ button.saved-toggle:hover { color: var(--ink); }
 .group-caret { color: var(--mute); transition: transform 0.15s; flex: 0 0 12px; display: grid; place-items: center; }
 .group.collapsed .group-caret { transform: rotate(-90deg); }
 .group-folder { flex: 0 0 14px; color: var(--cyan-deep); display: grid; place-items: center; transition: color 0.12s; }
-.group-folder.is-dirty { color: #f5a623; }
 .group-meta { min-width: 0; flex: 1; }
 .group-name {
   font-size: 13px; font-weight: 600; letter-spacing: -0.2px; color: var(--ink);
@@ -584,13 +488,6 @@ button.saved-toggle:hover { color: var(--ink); }
   animation: pop 0.12s ease;
 }
 
-/* dirty 点：跟 .group-folder.is-dirty 同色，表达"该标签有未保存改动" */
-.trow-dirty {
-  width: 6px; height: 6px;
-  border-radius: var(--r-full);
-  flex: 0 0 6px;
-  background: #f5a623;
-}
 /* 关闭按钮悬浮层：同 .group-actions 思路——绝对定位不占位、零回流，渐变遮罩淡出徽标 */
 .trow-actions {
   position: absolute;
@@ -610,53 +507,6 @@ button.saved-toggle:hover { color: var(--ink); }
   line-height: 1; flex: 0 0 18px; cursor: pointer;
 }
 .trow-close:hover { background: var(--hairline); color: var(--ink); }
-
-/* Saved groups */
-.saved-row {
-  display: flex; align-items: center; gap: 9px;
-  padding: 8px; margin: 1px 2px;
-  border-radius: var(--r-sm);
-  cursor: pointer; position: relative;
-  transition: background 0.1s;
-}
-.saved-row:hover { background: var(--canvas-soft-2); }
-.saved-ic {
-  flex: 0 0 26px; height: 26px;
-  border-radius: var(--r-sm);
-  display: grid; place-items: center;
-  background: var(--canvas);
-  border: 1px solid var(--hairline);
-  color: var(--violet);
-}
-/* 工作区快照行：换个色相跟单分组行区分（图标已不同，颜色只是加强） */
-.saved-ic-ws { color: var(--cyan-deep); }
-.saved-meta { min-width: 0; flex: 1; }
-.saved-name {
-  font-size: 13px; font-weight: 500; color: var(--ink);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.saved-sub {
-  font-family: var(--mono); font-size: 10px; color: var(--mute);
-  margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.saved-delete {
-  flex: 0 0 26px;
-  width: 26px; height: 26px;
-  background: var(--canvas);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  color: var(--mute);
-  cursor: pointer;
-  display: grid; place-items: center;
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s, border-color 0.12s, background 0.12s;
-}
-.saved-row:hover .saved-delete { opacity: 1; }
-.saved-delete:hover {
-  color: var(--error);
-  border-color: var(--error);
-  background: var(--canvas-soft);
-}
 
 .side-empty {
   padding: 14px 12px;
@@ -765,7 +615,6 @@ button.saved-toggle:hover { color: var(--ink); }
   flex: 1 1 auto; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.tabchip .trow-dirty { flex: 0 0 auto; }
 .tabchip-close {
   display: inline-grid; place-items: center;
   flex: 0 0 auto;
@@ -789,10 +638,6 @@ button.saved-toggle:hover { color: var(--ink); }
   transition: background 0.12s, color 0.12s;
 }
 .tabstrip-add:hover { background: var(--hairline); color: var(--ink); }
-
-/* 顶栏「分组/工作区管理」按钮：仅水平标签栏下露出（垂直模式走左栏入口） */
-#manageTopBtn { display: none; }
-.tabbar-horizontal #manageTopBtn { display: grid; }
 
 /* 顶栏"启动 CC"按钮：仅纯 pwsh 标签显示（toolbar.render 加 .show）。
    借用 sp-busy 的 cc 蓝色系，暗示"在这里点一下就能开 Claude Code"。 */
@@ -920,33 +765,6 @@ button.saved-toggle:hover { color: var(--ink); }
 #sessionMenu .sess-meta > span:nth-child(2) { text-align: center; }
 #sessionMenu .sess-meta > span:nth-child(3) { text-align: right; }
 
-/* 会话选择浮层：点「N 会话」徽标弹出的小列表（两个恢复入口共用）。
-   内部行复用 .sess-item / .sdot / .sess-title / .sess-meta 的外观。 */
-.sesspick {
-  position: fixed;
-  z-index: 2000;
-  min-width: 240px;
-  max-width: 360px;
-  max-height: 60vh;
-  overflow-y: auto;
-  scrollbar-width: none;
-  padding: 6px;
-  background: var(--canvas);
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--r-md, 10px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-  animation: pop 0.12s ease;
-}
-.sesspick::-webkit-scrollbar { width: 0; height: 0; display: none; }
-.sesspick-head {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.4px;
-  color: var(--mute);
-  text-transform: uppercase;
-  padding: 4px 8px 6px;
-}
-.sesspick-item.selected { background: var(--canvas-soft); outline: 1px solid var(--violet); }
 .menu-foot {
   border-top: 1px solid var(--hairline);
   margin-top: 4px; padding: 8px 10px 6px;
@@ -1326,101 +1144,6 @@ button.saved-toggle:hover { color: var(--ink); }
 #pickScrim { z-index: 85; }
 #confirmScrim { z-index: 90; }
 
-/* ─── Pick tabs modal ─────────────────────────────────────────────── */
-.modal.modal-pick { width: 480px; padding: 24px 28px; }
-.modal.modal-pick h2 { font-size: 18px; margin-bottom: 6px; }
-.pk-toolbar {
-  display: flex; align-items: center; gap: 6px;
-  margin: 8px 0 6px;
-  font-size: 12px; color: var(--mute);
-}
-.pk-count { margin-left: auto; font-family: var(--mono); }
-.pk-list {
-  max-height: 300px;
-  overflow-y: auto;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  padding: 4px;
-  background: var(--canvas);
-  scrollbar-width: none;
-}
-.pk-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
-.pk-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--ink);
-}
-.pk-row:hover { background: var(--canvas-soft); }
-.pk-row.is-disabled { color: var(--mute); cursor: not-allowed; }
-.pk-row input[type='checkbox'] { width: 14px; height: 14px; accent-color: var(--link); flex: 0 0 14px; }
-.pk-row .pk-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pk-row .pk-meta { font-family: var(--mono); font-size: 11px; color: var(--mute); flex: 0 0 auto; }
-/* 可点的"N 个会话"徽标：点开会话小列表指定要恢复的会话 */
-.pk-row .pk-sess-count {
-  color: var(--cyan-deep); background: transparent;
-  border: 1px solid var(--hairline); border-radius: var(--r-sm);
-  padding: 1px 6px; cursor: pointer; transition: background 0.1s, border-color 0.1s;
-}
-.pk-row .pk-sess-count:hover { background: var(--canvas-soft-2); border-color: var(--hairline-strong); }
-.pk-row .pk-sess-count.chosen {
-  color: var(--violet); border-color: var(--violet);
-  /* 指定会话后回显完整标题可能很长：兜底限宽，超出省略（完整标题在 title 悬浮可见） */
-  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.pk-row[data-row-action='1'] {
-  margin-top: 8px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--hairline);
-}
-.pk-row[data-row-action='1'] .pk-label { color: var(--ink); font-weight: 500; }
-.pk-row .pk-input {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0 10px;
-  font: inherit;
-  color: var(--ink);
-  background: var(--canvas);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  outline: none;
-  transition: border-color 0.12s;
-}
-.pk-row .pk-input::placeholder { color: var(--mute); }
-.pk-row .pk-input:focus { border-color: var(--ink); }
-.pk-row .pk-side-toggle {
-  flex: 0 0 auto;
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; color: var(--mute);
-  cursor: pointer; user-select: none;
-  padding: 2px 6px; border-radius: var(--r-sm);
-}
-.pk-row .pk-side-toggle:hover { color: var(--ink); background: var(--canvas); }
-.pk-row .pk-side-toggle input[type='checkbox'] {
-  width: 12px; height: 12px; flex: 0 0 12px; accent-color: var(--link);
-}
-.pk-row .pk-del {
-  flex: 0 0 24px;
-  width: 24px; height: 24px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  color: var(--mute);
-  cursor: pointer;
-  display: grid; place-items: center;
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s, border-color 0.12s, background 0.12s;
-}
-.pk-row:hover .pk-del { opacity: 1; }
-.pk-row .pk-del:hover {
-  color: var(--error);
-  border-color: var(--error);
-  background: var(--canvas);
-}
-
 /* ─── Manage modal（已保存的分组管理） ────────────────────────────── */
 .modal.modal-manage {
   width: 80vw; max-width: 1100px; height: 80vh;
@@ -1465,74 +1188,6 @@ button.saved-toggle:hover { color: var(--ink); }
 .mg-head .mg-search:focus { border-color: var(--ink); background: var(--canvas); }
 /* 隐藏浏览器原生 type=search 的清除按钮（webkit），交互在 ESC / 删字符上 */
 .mg-head .mg-search::-webkit-search-cancel-button { -webkit-appearance: none; }
-
-/* 弹窗内 Tab：已保存分组 / 已保存工作区。有 tabbar 时分隔线由 tabbar 承担 */
-.modal-manage .mg-head:has(+ .mg-tabbar) { border-bottom: none; padding-bottom: 6px; }
-.mg-tabbar {
-  display: flex; gap: 4px;
-  padding: 0 28px;
-  border-bottom: 1px solid var(--hairline);
-  flex: 0 0 auto;
-}
-.mg-tab-btn {
-  border: none; background: transparent; color: var(--mute);
-  padding: 8px 10px; cursor: pointer;
-  font-family: inherit; font-size: 13px; letter-spacing: -0.1px;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color 0.12s, border-color 0.12s;
-}
-.mg-tab-btn:hover { color: var(--body); }
-.mg-tab-btn.active { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
-
-/* 主体区：左缘 A~Z 跳转条 + 列表 */
-.mg-body-wrap {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-}
-.mg-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-.mg-az {
-  flex: 0 0 28px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 0 14px;
-  opacity: 0.35;
-  transition: opacity 0.18s ease;
-  user-select: none;
-}
-.mg-az:hover { opacity: 1; }
-.mg-az-letter {
-  font-family: var(--mono);
-  font-size: 9px;
-  line-height: 1;
-  padding: 2.5px 0;
-  width: 100%;
-  text-align: center;
-  color: var(--mute);
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  transition: transform 0.1s ease, color 0.1s ease;
-}
-.mg-az-letter:hover {
-  color: var(--ink);
-  font-weight: 700;
-  transform: scale(1.6);
-}
-.mg-az-letter.disabled {
-  opacity: 0.3;
-  cursor: default;
-  pointer-events: none;
-}
 
 .mg-body {
   flex: 1; overflow-y: auto;
@@ -1680,8 +1335,7 @@ mark.hl {
    共用一套编辑态：无边框无底色无选区高亮 —— 光标落在最后一个字后面，
    看起来就是直接在原始文字上改（JS 侧把 selection collapse 到末尾）。 */
 .trow-name[contenteditable='true'],
-.mg-name[contenteditable='true'],
-.mg-tab-name[contenteditable='true'] {
+.mg-name[contenteditable='true'] {
   outline: none;
   background: transparent;
   cursor: text;
@@ -1716,60 +1370,8 @@ mark.hl {
 }
 .mg-btn:hover { background: var(--canvas-soft); color: var(--ink); border-color: var(--hairline-strong); }
 .mg-btn.mg-danger:hover { color: var(--error); border-color: var(--error); }
-.mg-row.is-expanded .mg-toggle svg { transform: rotate(180deg); }
-.mg-toggle svg { transition: transform 0.15s; }
 
-.mg-tabs {
-  padding: 4px 14px 12px 56px;
-  border-top: 1px solid var(--hairline);
-}
-.mg-tab {
-  display: flex; align-items: center; gap: 10px;
-  padding: 7px 10px;
-  border-radius: var(--r-sm);
-  font-size: 13px;
-  color: var(--ink);
-}
-.mg-tab:hover { background: var(--canvas-soft); }
-.mg-tab-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mg-tab-meta { font-family: var(--mono); font-size: 11px; color: var(--mute); flex: 0 0 auto; }
-/* 可点的"N 会话"徽标：点开弹会话小列表选一条恢复 */
-.mg-sess-count {
-  font-family: var(--mono); font-size: 11px;
-  color: var(--cyan-deep); background: transparent;
-  border: 1px solid var(--hairline); border-radius: var(--r-sm);
-  padding: 1px 6px; cursor: pointer; transition: background 0.1s, border-color 0.1s;
-}
-.mg-sess-count:hover { background: var(--canvas-soft-2); border-color: var(--hairline-strong); }
-/* 搜索命中的会话提示行（挂在标签行下方，点它直接恢复到该会话） */
-.mg-sess-hit {
-  margin: 1px 0 2px 34px;
-  padding: 3px 8px;
-  font-size: 12px;
-  color: var(--body);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.mg-sess-hit:hover { background: var(--canvas-soft); color: var(--ink); }
-.mg-sess-hit-arrow { color: var(--mute); }
-.mg-tab .mg-btn { width: 24px; height: 24px; flex: 0 0 24px; }
-.mg-tab .mg-tab-restore { color: var(--body); }
-.mg-tab .mg-tab-restore:hover { color: var(--ink); background: var(--canvas-soft-2); }
-/* 工作区展开后的分组展示行：纯展示，无操作位 */
-.mg-ws-grp { cursor: default; }
-.mg-ws-grp .mg-ws-grp-ic {
-  flex: 0 0 auto; color: var(--mute);
-  display: inline-grid; place-items: center;
-}
-.mg-tab-name[data-rename-tab] { cursor: default; }
 .mg-name[data-rename-group] { cursor: pointer; }
-.mg-tab-empty {
-  padding: 8px 10px;
-  font-size: 12px;
-  color: var(--mute);
-  font-style: italic;
-}
 
 /* Toast */
 .toast {
@@ -2042,101 +1644,6 @@ mark.hl {
 #pickScrim { z-index: 85; }
 #confirmScrim { z-index: 90; }
 
-/* ─── Pick tabs modal ─────────────────────────────────────────────── */
-.modal.modal-pick { width: 480px; padding: 24px 28px; }
-.modal.modal-pick h2 { font-size: 18px; margin-bottom: 6px; }
-.pk-toolbar {
-  display: flex; align-items: center; gap: 6px;
-  margin: 8px 0 6px;
-  font-size: 12px; color: var(--mute);
-}
-.pk-count { margin-left: auto; font-family: var(--mono); }
-.pk-list {
-  max-height: 300px;
-  overflow-y: auto;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  padding: 4px;
-  background: var(--canvas);
-  scrollbar-width: none;
-}
-.pk-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
-.pk-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--ink);
-}
-.pk-row:hover { background: var(--canvas-soft); }
-.pk-row.is-disabled { color: var(--mute); cursor: not-allowed; }
-.pk-row input[type='checkbox'] { width: 14px; height: 14px; accent-color: var(--link); flex: 0 0 14px; }
-.pk-row .pk-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pk-row .pk-meta { font-family: var(--mono); font-size: 11px; color: var(--mute); flex: 0 0 auto; }
-/* 可点的"N 个会话"徽标：点开会话小列表指定要恢复的会话 */
-.pk-row .pk-sess-count {
-  color: var(--cyan-deep); background: transparent;
-  border: 1px solid var(--hairline); border-radius: var(--r-sm);
-  padding: 1px 6px; cursor: pointer; transition: background 0.1s, border-color 0.1s;
-}
-.pk-row .pk-sess-count:hover { background: var(--canvas-soft-2); border-color: var(--hairline-strong); }
-.pk-row .pk-sess-count.chosen {
-  color: var(--violet); border-color: var(--violet);
-  /* 指定会话后回显完整标题可能很长：兜底限宽，超出省略（完整标题在 title 悬浮可见） */
-  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.pk-row[data-row-action='1'] {
-  margin-top: 8px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--hairline);
-}
-.pk-row[data-row-action='1'] .pk-label { color: var(--ink); font-weight: 500; }
-.pk-row .pk-input {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0 10px;
-  font: inherit;
-  color: var(--ink);
-  background: var(--canvas);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  outline: none;
-  transition: border-color 0.12s;
-}
-.pk-row .pk-input::placeholder { color: var(--mute); }
-.pk-row .pk-input:focus { border-color: var(--ink); }
-.pk-row .pk-side-toggle {
-  flex: 0 0 auto;
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; color: var(--mute);
-  cursor: pointer; user-select: none;
-  padding: 2px 6px; border-radius: var(--r-sm);
-}
-.pk-row .pk-side-toggle:hover { color: var(--ink); background: var(--canvas); }
-.pk-row .pk-side-toggle input[type='checkbox'] {
-  width: 12px; height: 12px; flex: 0 0 12px; accent-color: var(--link);
-}
-.pk-row .pk-del {
-  flex: 0 0 24px;
-  width: 24px; height: 24px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  color: var(--mute);
-  cursor: pointer;
-  display: grid; place-items: center;
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s, border-color 0.12s, background 0.12s;
-}
-.pk-row:hover .pk-del { opacity: 1; }
-.pk-row .pk-del:hover {
-  color: var(--error);
-  border-color: var(--error);
-  background: var(--canvas);
-}
-
 /* ─── Manage modal（已保存的分组管理） ────────────────────────────── */
 .modal.modal-manage {
   width: 80vw; max-width: 1100px; height: 80vh;
@@ -2181,74 +1688,6 @@ mark.hl {
 .mg-head .mg-search:focus { border-color: var(--ink); background: var(--canvas); }
 /* 隐藏浏览器原生 type=search 的清除按钮（webkit），交互在 ESC / 删字符上 */
 .mg-head .mg-search::-webkit-search-cancel-button { -webkit-appearance: none; }
-
-/* 弹窗内 Tab：已保存分组 / 已保存工作区。有 tabbar 时分隔线由 tabbar 承担 */
-.modal-manage .mg-head:has(+ .mg-tabbar) { border-bottom: none; padding-bottom: 6px; }
-.mg-tabbar {
-  display: flex; gap: 4px;
-  padding: 0 28px;
-  border-bottom: 1px solid var(--hairline);
-  flex: 0 0 auto;
-}
-.mg-tab-btn {
-  border: none; background: transparent; color: var(--mute);
-  padding: 8px 10px; cursor: pointer;
-  font-family: inherit; font-size: 13px; letter-spacing: -0.1px;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color 0.12s, border-color 0.12s;
-}
-.mg-tab-btn:hover { color: var(--body); }
-.mg-tab-btn.active { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
-
-/* 主体区：左缘 A~Z 跳转条 + 列表 */
-.mg-body-wrap {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-}
-.mg-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-.mg-az {
-  flex: 0 0 28px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 0 14px;
-  opacity: 0.35;
-  transition: opacity 0.18s ease;
-  user-select: none;
-}
-.mg-az:hover { opacity: 1; }
-.mg-az-letter {
-  font-family: var(--mono);
-  font-size: 9px;
-  line-height: 1;
-  padding: 2.5px 0;
-  width: 100%;
-  text-align: center;
-  color: var(--mute);
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  transition: transform 0.1s ease, color 0.1s ease;
-}
-.mg-az-letter:hover {
-  color: var(--ink);
-  font-weight: 700;
-  transform: scale(1.6);
-}
-.mg-az-letter.disabled {
-  opacity: 0.3;
-  cursor: default;
-  pointer-events: none;
-}
 
 .mg-body {
   flex: 1; overflow-y: auto;
@@ -2396,8 +1835,7 @@ mark.hl {
    共用一套编辑态：无边框无底色无选区高亮 —— 光标落在最后一个字后面，
    看起来就是直接在原始文字上改（JS 侧把 selection collapse 到末尾）。 */
 .trow-name[contenteditable='true'],
-.mg-name[contenteditable='true'],
-.mg-tab-name[contenteditable='true'] {
+.mg-name[contenteditable='true'] {
   outline: none;
   background: transparent;
   cursor: text;
@@ -2432,60 +1870,8 @@ mark.hl {
 }
 .mg-btn:hover { background: var(--canvas-soft); color: var(--ink); border-color: var(--hairline-strong); }
 .mg-btn.mg-danger:hover { color: var(--error); border-color: var(--error); }
-.mg-row.is-expanded .mg-toggle svg { transform: rotate(180deg); }
-.mg-toggle svg { transition: transform 0.15s; }
 
-.mg-tabs {
-  padding: 4px 14px 12px 56px;
-  border-top: 1px solid var(--hairline);
-}
-.mg-tab {
-  display: flex; align-items: center; gap: 10px;
-  padding: 7px 10px;
-  border-radius: var(--r-sm);
-  font-size: 13px;
-  color: var(--ink);
-}
-.mg-tab:hover { background: var(--canvas-soft); }
-.mg-tab-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mg-tab-meta { font-family: var(--mono); font-size: 11px; color: var(--mute); flex: 0 0 auto; }
-/* 可点的"N 会话"徽标：点开弹会话小列表选一条恢复 */
-.mg-sess-count {
-  font-family: var(--mono); font-size: 11px;
-  color: var(--cyan-deep); background: transparent;
-  border: 1px solid var(--hairline); border-radius: var(--r-sm);
-  padding: 1px 6px; cursor: pointer; transition: background 0.1s, border-color 0.1s;
-}
-.mg-sess-count:hover { background: var(--canvas-soft-2); border-color: var(--hairline-strong); }
-/* 搜索命中的会话提示行（挂在标签行下方，点它直接恢复到该会话） */
-.mg-sess-hit {
-  margin: 1px 0 2px 34px;
-  padding: 3px 8px;
-  font-size: 12px;
-  color: var(--body);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background 0.1s;
-}
-.mg-sess-hit:hover { background: var(--canvas-soft); color: var(--ink); }
-.mg-sess-hit-arrow { color: var(--mute); }
-.mg-tab .mg-btn { width: 24px; height: 24px; flex: 0 0 24px; }
-.mg-tab .mg-tab-restore { color: var(--body); }
-.mg-tab .mg-tab-restore:hover { color: var(--ink); background: var(--canvas-soft-2); }
-/* 工作区展开后的分组展示行：纯展示，无操作位 */
-.mg-ws-grp { cursor: default; }
-.mg-ws-grp .mg-ws-grp-ic {
-  flex: 0 0 auto; color: var(--mute);
-  display: inline-grid; place-items: center;
-}
-.mg-tab-name[data-rename-tab] { cursor: default; }
 .mg-name[data-rename-group] { cursor: pointer; }
-.mg-tab-empty {
-  padding: 8px 10px;
-  font-size: 12px;
-  color: var(--mute);
-  font-style: italic;
-}
 
 /* Toast */
 .toast {
@@ -2659,8 +2045,6 @@ mark.hl {
   flex-direction: column;
   gap: 12px;
 }
-.set-row-usage .usage-cell { min-width: 0; }
-.set-row-usage .usage-cell label { margin-bottom: 6px; }
 /* 标题就是标题：纯文字，可选中，点击不触发任何控件（HTML 侧已不写 for 关联） */
 .set-row label {
   display: block;

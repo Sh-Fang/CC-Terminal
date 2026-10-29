@@ -24,8 +24,6 @@ export interface Settings {
   lastUsedCwd: string
   sidebarWidth: number
   sidebarCollapsed: boolean
-  savedCollapsed: boolean
-  sidebarSavedHeight: number   // 「已保存的分组」区像素高度（0 = 用 CSS 默认 40%）
   statusDowngradeSec: number   // done/attention 停留多少秒后降回 idle（1~10）
   closeBehavior: CloseBehavior // 点关闭按钮：quit = 确认后退出；tray = 不确认，收进托盘
   showFloater: boolean         // 开启常驻悬浮窗
@@ -54,8 +52,6 @@ export const DEFAULT_SETTINGS: Settings = {
   lastUsedCwd: '',
   sidebarWidth: 268,
   sidebarCollapsed: false,
-  savedCollapsed: false,
-  sidebarSavedHeight: 0,
   statusDowngradeSec: 5,
   closeBehavior: 'quit',
   showFloater: false,
