@@ -164,7 +164,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // 判断命令行是否「启动智能体」（claude / cct / codex / claudePath basename）：命中则跳过 shell-busy，交给 hooks 驱动状态。
 function commandLineIsCcInvocation(cmd: string | undefined, claudePath: string): boolean {
   if (!cmd) return false
-  const m = /^\s*(?:&\s+)?(?:'([^']*)'|"([^"]*)"|(\S+))/.exec(cmd)
+  const m = /^\s*(?:(?:Clear-Host|cls|clear)\s*[;&]\s*)?(?:&\s+)?(?:'([^']*)'|"([^"]*)"|(\S+))/i.exec(cmd)
   if (!m) return false
   const exe = (m[1] ?? m[2] ?? m[3] ?? '').toLowerCase()
   if (!exe) return false
@@ -329,26 +329,108 @@ function ccGateRelease(tabId: string): void {
 // 这些 tabId 的下一次 onPtyStarted 破例走一次 launchCC，用完即消费。
 const resumeCcOnNextStart = new Set<string>()
 
+// ─── 启动画面 ───────────────────────────────────────────────────
+// 前台程序变成该智能体之后，输出停顿 LAUNCH_QUIET_MS 视为界面画完；
+// 启动命令执行完、智能体退回提示符、Ctrl+C、超时都直接撤掉
+interface LaunchWatch {
+  tab: TerminalTab
+  agent: AgentKind
+  sent: boolean
+  cmdStarted: boolean
+  sawAgent: boolean
+  quietTimer: number | null
+  timeout: number
+}
+const launchWatch = new Map<string, LaunchWatch>()
+// 启动命令发出前按了 Ctrl+C 的标签：这一轮不再发命令
+const launchAborted = new Set<string>()
+const LAUNCH_QUIET_MS = 300
+const LAUNCH_TIMEOUT_MS = 20000
+
+// 要启动的智能体，以及是否打算续上主会话（对话记录是否还在由 launchCC 再判断）
+function launchPlan(tab: TerminalTab, pick?: AgentKind): { agent: AgentKind; resume: boolean } {
+  const top = tab.activeSessionId
+  const topAgent = top ? (tab.sessions.find((x) => x.sessionId === top)?.agent ?? 'claude') : undefined
+  const agent = pick ?? topAgent ?? 'claude'
+  return { agent, resume: !!top && topAgent === agent && UUID_RE.test(top) }
+}
+
+// 已显示时只更新图标和文字，计时不重置
+function beginLaunchScreen(tab: TerminalTab, agent: AgentKind, resume: boolean): void {
+  const label = resume ? t('正在恢复会话') : t('正在启动 {0}', agent === 'codex' ? 'Codex' : 'Claude Code')
+  tab.showLaunchScreen(icon(agent, { size: 40 }), label)
+  const w = launchWatch.get(tab.id)
+  if (w) {
+    w.agent = agent
+    return
+  }
+  launchWatch.set(tab.id, {
+    tab,
+    agent,
+    sent: false,
+    cmdStarted: false,
+    sawAgent: false,
+    quietTimer: null,
+    timeout: window.setTimeout(() => endLaunchScreen(tab.id), LAUNCH_TIMEOUT_MS)
+  })
+}
+
+function endLaunchScreen(tabId: string): void {
+  const w = launchWatch.get(tabId)
+  if (!w) return
+  launchWatch.delete(tabId)
+  if (w.quietTimer != null) window.clearTimeout(w.quietTimer)
+  window.clearTimeout(w.timeout)
+  w.tab.hideLaunchScreen()
+}
+
+function abortLaunch(tabId: string): void {
+  if (launchWatch.get(tabId)?.sent === false) launchAborted.add(tabId)
+  endLaunchScreen(tabId)
+}
+
+function armLaunchQuiet(w: LaunchWatch): void {
+  if (w.quietTimer != null) window.clearTimeout(w.quietTimer)
+  w.quietTimer = window.setTimeout(() => endLaunchScreen(w.tab.id), LAUNCH_QUIET_MS)
+}
+
+// 即将起 PTY / 重启 PTY 且会自动拉起智能体时，先盖上启动画面
+function beginLaunchScreenIfAuto(tab: TerminalTab): void {
+  launchAborted.delete(tab.id)
+  if (!tab.autoLaunchCC && !resumeCcOnNextStart.has(tab.id)) return
+  const plan = launchPlan(tab)
+  beginLaunchScreen(tab, plan.agent, plan.resume)
+}
+
+// 启动命令前先清屏，撤掉启动画面后看不到回显的命令
+function clearScreenPrefix(shell?: ForegroundProgram): string {
+  if (shell === 'cmd') return 'cls & '
+  return IS_WIN_PLATFORM ? 'Clear-Host; ' : 'clear; '
+}
+
 // shell：要把命令发进哪种 shell，决定引号与调用语法；不传则是标签页自己起的 shell
 // pick：右键选的智能体；不传则跟随主会话所属的智能体（没有主会话按 Claude Code）
 async function launchCC(tab: TerminalTab, shell?: ForegroundProgram, pick?: AgentKind): Promise<void> {
   const forced = resumeCcOnNextStart.delete(tab.id)
-  if (!tab.autoLaunchCC && !forced) return
-  if (tab.ptyId == null) return
+  if ((!tab.autoLaunchCC && !forced) || tab.ptyId == null || launchAborted.delete(tab.id)) {
+    endLaunchScreen(tab.id)
+    return
+  }
+  const top = tab.activeSessionId
+  const { agent, resume } = launchPlan(tab, pick)
+  beginLaunchScreen(tab, agent, resume)
   await ccGateAcquire(tab.id)
   // 排队期间 tab 可能已关闭 / pty 已退出
   if (tab.ptyId == null) {
     ccGateRelease(tab.id)
+    endLaunchScreen(tab.id)
     return
   }
 
-  const top = tab.activeSessionId
-  const topAgent = top ? (tab.sessions.find((x) => x.sessionId === top)?.agent ?? 'claude') : undefined
-  const agent = pick ?? topAgent ?? 'claude'
   // 主会话属于这个智能体：还在就续上；对话记录已不在则从栈里移除，新开会话（hook 上报后成为栈顶）。
   // 主会话属于另一个智能体：保留它，直接新开
   let resumeId: string | null = null
-  if (top && topAgent === agent && UUID_RE.test(top)) {
+  if (resume && top) {
     const exists = agent === 'codex'
       ? await window.term.codexSessionExists(top)
       : await window.term.claudeSessionExists(top)
@@ -356,16 +438,20 @@ async function launchCC(tab: TerminalTab, shell?: ForegroundProgram, pick?: Agen
       resumeId = top
     } else {
       await op({ op: 'removeSession', tabId: tab.id, sessionId: top })
+      beginLaunchScreen(tab, agent, false)
     }
   }
   const cmd = agent === 'codex'
     ? await codexCommand(tab, resumeId)
     : await claudeCommand(tab, shell, resumeId)
-  if (cmd == null || tab.ptyId == null) {
+  if (cmd == null || tab.ptyId == null || launchAborted.delete(tab.id)) {
     ccGateRelease(tab.id)
+    endLaunchScreen(tab.id)
     return
   }
-  window.term.send(tab.ptyId, cmd + '\r')
+  const w = launchWatch.get(tab.id)
+  if (w) w.sent = true
+  window.term.send(tab.ptyId, clearScreenPrefix(shell) + cmd + '\r')
 }
 
 // 拼 claude 启动命令；claude 不可用时在终端里提示并返回 null
@@ -480,6 +566,7 @@ function buildTab(group: Group, opts: {
       onRequestNewTab: () => promptNewTabInGroup(group.id),
       onRequestCloseSelf: () => closeTab(id),
       onPtyStarted: () => void launchCC(tabRef),
+      onLaunchAbort: () => abortLaunch(id),
       onUserAbort: () => {
         if (tabRef.status !== 'busy') return
         tabRef.status = 'idle'
@@ -493,6 +580,11 @@ function buildTab(group: Group, opts: {
         refreshUI()
       },
       onShellCommand: (kind, cmd) => {
+        const lw = launchWatch.get(id)
+        if (lw?.sent) {
+          if (kind === 'start') lw.cmdStarted = true
+          else if (lw.cmdStarted) endLaunchScreen(id)
+        }
         // shell integration OSC 触发 → pwsh 一定在前台（cc 全屏 TUI 会屏蔽这些序列），据此翻回 ccActive
         if (tabRef.ccActive) {
           tabRef.ccActive = false
@@ -553,6 +645,7 @@ async function createGroup(name: string, cwd: string): Promise<string> {
 }
 
 async function spawnTabPty(tab: TerminalTab): Promise<void> {
+  beginLaunchScreenIfAuto(tab)
   // 等 setActive 的 rAF 跑完（fit 已算出真实 cols/rows）再 startPty；
   // 否则 PTY 以 display:none 时的 80×24 启动，cc splash 画到一半收 SIGWINCH 会整屏错位。
   if (window.__termDebug) console.log(`[term] +${performance.now().toFixed(1)}ms`, tab.id, 'spawnTabPty: awaiting rAF before startPty')
@@ -755,6 +848,7 @@ function unmountTabs(ids: string[]): void {
       }
       children.delete(tab.id)
       lazyTabs.delete(tab.id)
+      endLaunchScreen(tab.id)
       tab.dispose()
       if (downgradeTabId === tab.id) clearDowngradeTimer()
     }
@@ -855,6 +949,7 @@ async function doReloadTab(tabId: string): Promise<void> {
   // reload 前 cc 活跃（含手敲 cct 起的）→ 新 PTY 里按主会话续上
   if (tab.autoLaunchCC || tab.ccActive) resumeCcOnNextStart.add(tab.id)
   reloadingTabs.add(tabId)
+  beginLaunchScreenIfAuto(tab)
   // 进程态全部归零：旧 PTY 的 busy/报错说明和 cc 活跃标记都不该带到新进程
   tab.status = 'idle'
   tab.note = undefined
@@ -1050,6 +1145,7 @@ async function deleteSession(sessionId: string): Promise<void> {
     onOk: async () => {
       await op({ op: 'removeSession', tabId: tab.id, sessionId })
       if (wasTop) {
+        beginLaunchScreenIfAuto(tab)
         await tab.restartPty()
       }
     }
@@ -1067,6 +1163,7 @@ export async function switchSession(sessionId: string): Promise<void> {
     return
   }
   await op({ op: 'setTop', tabId: tab.id, sessionId })
+  beginLaunchScreenIfAuto(tab)
   await tab.restartPty()
   refreshUI()
 }
@@ -1430,7 +1527,12 @@ export async function initApp(): Promise<void> {
 
   // ─── PTY 全局路由 ───────────────────────────────────────────────
   const offData = window.term.onData((id, data) => {
-    for (const t of allTabs()) if (t.ptyId === id) return t.writeFromPty(data)
+    for (const t of allTabs()) {
+      if (t.ptyId !== id) continue
+      const lw = launchWatch.get(t.id)
+      if (lw?.sawAgent) armLaunchQuiet(lw)
+      return t.writeFromPty(data)
+    }
   })
   const offExit = window.term.onExit((id, exitCode) => {
     fgByPty.delete(id)
@@ -1439,6 +1541,16 @@ export async function initApp(): Promise<void> {
   const offForeground = window.term.onForeground((id, info) => {
     const prev = fgByPty.get(id)
     fgByPty.set(id, info)
+    const lt = allTabs().find((t) => t.ptyId === id)
+    const lw = lt ? launchWatch.get(lt.id) : undefined
+    if (lt && lw?.sent) {
+      if (info.program === lw.agent) {
+        if (!lw.sawAgent) armLaunchQuiet(lw)
+        lw.sawAgent = true
+      } else if (lw.sawAgent && info.atPrompt) {
+        endLaunchScreen(lt.id)
+      }
+    }
     // 智能体退回提示符时还挂着「运行中」（如 Codex 请求出错不发 Stop）→ 降回空闲
     if (info.atPrompt && (prev?.program === 'claude' || prev?.program === 'codex')) {
       const tab = allTabs().find((t) => t.ptyId === id)

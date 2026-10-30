@@ -763,6 +763,29 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   overflow: hidden;
 }
 .term-host.active { display: block; }
+/* 启动画面：盖住整块终端，底色继承 term-host（终端配色），文字色取终端前景色 */
+.launch-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: inherit;
+}
+.launch-icon { display: flex; opacity: 0.9; }
+.launch-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  opacity: 0.6;
+  animation: cv-spin 0.8s linear infinite;
+}
+.launch-label { font-size: 13px; opacity: 0.7; }
 .xterm, .xterm-viewport, .xterm-screen { height: 100%; }
 /* IME 组合时 xterm 会把 helper-textarea 设可见并贴在光标格上。
    光标靠近右边缘且预编辑字符串很长 → textarea 视觉矩形会冲出 term-host，

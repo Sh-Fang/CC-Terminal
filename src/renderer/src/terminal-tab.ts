@@ -20,6 +20,8 @@ export interface TermTabHandlers {
   onErrorDetected?: (note?: string) => void
   // pwsh shell integration（OSC 133;C/D + 633;E）上报非 cc 命令的开始/结束，cmdLine 仅 start 时有值
   onShellCommand?: (kind: 'start' | 'end', cmdLine?: string) => void
+  // 启动画面期间按 Ctrl+C：中断智能体启动
+  onLaunchAbort?: () => void
 }
 
 export interface SessionRecord {
@@ -124,6 +126,8 @@ export class TerminalTab {
   private reloading = false
   private disposed = false
   private handlers: TermTabHandlers
+  // 启动画面：智能体续上/启动完成前盖住终端，期间键入只放行 Ctrl+C
+  private launchScreen: HTMLDivElement | null = null
 
   // 选区缓存
   private lastSelection = ''
@@ -511,6 +515,10 @@ export class TerminalTab {
 
   // 唯一出口：统一处理 waitingForRestart / pendingInput / 实际发送
   private sendInput(d: string): void {
+    if (this.launchScreen) {
+      if (d !== '') return
+      this.handlers.onLaunchAbort?.()
+    }
     if (this.reloading) return
     if (this.waitingForRestart) {
       this.waitingForRestart = false
@@ -522,6 +530,25 @@ export class TerminalTab {
       return
     }
     window.term.send(this.ptyId, d)
+  }
+
+  // ── 启动画面 ──
+
+  // 已显示时只更新图标和文字
+  showLaunchScreen(iconSvg: string, label: string): void {
+    if (!this.launchScreen) {
+      this.launchScreen = document.createElement('div')
+      this.launchScreen.className = 'launch-screen'
+      this.launchScreen.style.color = this.term.options.theme?.foreground ?? ''
+      this.host.appendChild(this.launchScreen)
+    }
+    this.launchScreen.innerHTML = `<div class="launch-icon">${iconSvg}</div><div class="launch-spinner"></div><div class="launch-label"></div>`
+    this.launchScreen.querySelector('.launch-label')!.textContent = label
+  }
+
+  hideLaunchScreen(): void {
+    this.launchScreen?.remove()
+    this.launchScreen = null
   }
 
   // ── PTY 生命周期 ──

@@ -26,6 +26,10 @@ _Avoid_: 当前进程、运行类型
 Claude Code、Codex 这类在终端里运行的 AI 会话程序。
 _Avoid_: agent、AI 工具
 
+**启动画面**:
+智能体续上或启动完成之前，盖在标签页上的等待画面。
+_Avoid_: 加载页、loading、遮罩
+
 **会话**:
 Claude Code 的一次对话，有自己的会话 ID 和对话记录。同一标签页名下的会话彼此平级。
 _Avoid_: session、对话、子会话
