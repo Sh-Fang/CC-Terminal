@@ -562,14 +562,8 @@ async function spawnTabPty(tab: TerminalTab): Promise<void> {
   void refreshSessionMeta(tab)
 }
 
-// 每帧只起一小批 PTY，批间让出一帧，避免恢复多标签时长任务卡死 UI 线程。
-const RESTORE_BATCH = 2
-async function spawnTabsBatched(tabs: TerminalTab[]): Promise<void> {
-  for (let i = 0; i < tabs.length; i += RESTORE_BATCH) {
-    if (i > 0) await new Promise<void>((r) => requestAnimationFrame(() => r()))
-    await Promise.all(tabs.slice(i, i + RESTORE_BATCH).map((t) => spawnTabPty(t)))
-  }
-}
+// 启动恢复时未激活的标签：PTY 推迟到首次激活再起
+const lazyTabs = new Set<string>()
 
 // 从 cc 对话记录补会话的最后活跃时间与标题来源（主进程读文件）
 async function refreshSessionMeta(tab: TerminalTab): Promise<void> {
@@ -744,6 +738,7 @@ export function activateTab(tabId: string): void {
   clearDowngradeTimer()
   maybeStartDowngrade(tabId, ctx.tab.status)
   activateUI(tabId)
+  if (lazyTabs.delete(tabId)) void spawnTabPty(ctx.tab)
   if (!isChildId(tabId)) {
     void op({ op: 'setActiveTab', id: tabId })
   }
@@ -759,6 +754,7 @@ function unmountTabs(ids: string[]): void {
         c.dispose()
       }
       children.delete(tab.id)
+      lazyTabs.delete(tab.id)
       tab.dispose()
       if (downgradeTabId === tab.id) clearDowngradeTimer()
     }
@@ -778,6 +774,7 @@ function unmountTabs(ids: string[]): void {
     activeTabId = next?.id ?? null
     if (next) {
       activateUI(next.id)
+      if (lazyTabs.delete(next.id)) void spawnTabPty(next)
       void op({ op: 'setActiveTab', id: next.id })
     }
   }
@@ -854,6 +851,7 @@ async function doReloadTab(tabId: string): Promise<void> {
   const ctx = findTab(tabId)
   if (!ctx || reloadingTabs.has(tabId)) return
   const { tab } = ctx
+  lazyTabs.delete(tabId)
   // reload 前 cc 活跃（含手敲 cct 起的）→ 新 PTY 里按主会话续上
   if (tab.autoLaunchCC || tab.ccActive) resumeCcOnNextStart.add(tab.id)
   reloadingTabs.add(tabId)
@@ -1421,10 +1419,9 @@ async function restoreOpenTabs(): Promise<void> {
   const want = store.activeTabId && tabs.some((x) => x.id === store.activeTabId) ? store.activeTabId : tabs[0].id
   activeTabId = want
   activateUI(want)
-  // 当前标签先起，其余分批跟上
-  const first = tabs.find((x) => x.id === want)!
-  await spawnTabPty(first)
-  await spawnTabsBatched(tabs.filter((x) => x !== first))
+  // 只起当前标签，其余等首次激活
+  for (const x of tabs) if (x.id !== want) lazyTabs.add(x.id)
+  await spawnTabPty(tabs.find((x) => x.id === want)!)
 }
 
 // initApp：组件树挂载后跑一次。
