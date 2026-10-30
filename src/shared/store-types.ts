@@ -40,6 +40,8 @@ export interface GroupRec {
   cwd: string
   collapsed: boolean
   tabIds: string[]
+  // 用户手动关闭了分组；标签页全部关掉的分组仍是打开的
+  closed: boolean
 }
 
 export interface StoreData {
@@ -68,6 +70,7 @@ export type StoreOp =
   | { op: 'renameGroup'; id: string; name: string }
   | { op: 'setCollapsed'; ids: string[]; collapsed: boolean }
   | { op: 'reorderGroups'; ids: string[] }
+  | { op: 'closeGroup'; id: string }
   | { op: 'createTab'; id: string; groupId: string; name: string; autoLaunchCC: boolean; stack?: string[] }
   | { op: 'renameTab'; id: string; name: string }
   | { op: 'setAutoLaunch'; id: string; autoLaunchCC: boolean }

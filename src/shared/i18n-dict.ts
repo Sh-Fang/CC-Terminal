@@ -528,6 +528,8 @@ export const I18N_EN: Record<string, string> = {
   '启动智能体': 'Launch agent',
   '正在恢复会话': 'Resuming session',
   '正在启动 {0}': 'Starting {0}',
+  '恢复会话': 'Resume session',
+  '启动 {0}': 'Start {0}',
   '暂无会话': 'No sessions',
   '重新加载会中断正在进行的回合。': 'Reloading will interrupt the turn in progress.',
   '重新加载会中断正在运行的命令。': 'Reloading will interrupt the running command.',

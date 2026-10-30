@@ -20,8 +20,10 @@ export interface TermTabHandlers {
   onErrorDetected?: (note?: string) => void
   // pwsh shell integration（OSC 133;C/D + 633;E）上报非 cc 命令的开始/结束，cmdLine 仅 start 时有值
   onShellCommand?: (kind: 'start' | 'end', cmdLine?: string) => void
-  // 启动画面期间按 Ctrl+C：中断智能体启动
+  // 启动画面期间按 Ctrl+C / Esc：中断智能体启动
   onLaunchAbort?: () => void
+  // 启动画面上点按钮 / 按回车
+  onLaunchConfirm?: () => void
 }
 
 export interface SessionRecord {
@@ -86,6 +88,8 @@ const CC_ERROR_RE = new RegExp(CC_ERROR_PATTERNS.map(([re]) => re.source).join('
 // 顶层分支，不受 "API Error:" 前缀约束，于是重试第一秒就点亮红点——而这一轮往往重试几次就成功了，
 // 期间 cc 不发任何 hook，红点只能干等到下一个 PostToolUse/Stop 才消，这就是「错误恢复了红点还红着」。
 // 收紧前缀之后已经不会命中，这里再显式拦一道：带重试字样的片段一律不算错误。
+// xterm 对终端查询的自动应答：光标位置、设备属性、模式查询、焦点、OSC / DCS 应答
+const TERM_REPLY_RE = /^\x1b(?:\[[?>]?[\d;]*[Rcn]|\[\?[\d;]*\$y|\[[IO]|\][^\x07\x1b]*(?:\x07|\x1b\\)|P[^\x1b]*\x1b\\)$/
 const CC_RETRY_RE = /Retrying in|attempt \d+\/\d+/i
 
 /*
@@ -516,8 +520,19 @@ export class TerminalTab {
   // 唯一出口：统一处理 waitingForRestart / pendingInput / 实际发送
   private sendInput(d: string): void {
     if (this.launchScreen) {
-      if (d !== '') return
-      this.handlers.onLaunchAbort?.()
+      if (TERM_REPLY_RE.test(d)) {
+        // xterm 对终端查询的自动应答照常发出
+      } else if (d === '\r' && this.launchScreen.querySelector('button')) {
+        this.handlers.onLaunchConfirm?.()
+        return
+      } else if (d === '\x1b') {
+        this.handlers.onLaunchAbort?.()
+        return
+      } else if (d === '\x03') {
+        this.handlers.onLaunchAbort?.()
+      } else {
+        return
+      }
     }
     if (this.reloading) return
     if (this.waitingForRestart) {
@@ -534,21 +549,41 @@ export class TerminalTab {
 
   // ── 启动画面 ──
 
-  // 已显示时只更新图标和文字
-  showLaunchScreen(iconSvg: string, label: string): void {
+  // 已显示时只更新内容；action 为按钮文字，传了就显示按钮而不是转圈
+  showLaunchScreen(iconSvg: string, label: string, action?: string): void {
     if (!this.launchScreen) {
       this.launchScreen = document.createElement('div')
       this.launchScreen.className = 'launch-screen'
       this.launchScreen.style.color = this.term.options.theme?.foreground ?? ''
       this.host.appendChild(this.launchScreen)
     }
-    this.launchScreen.innerHTML = `<div class="launch-icon">${iconSvg}</div><div class="launch-spinner"></div><div class="launch-label"></div>`
+    this.launchScreen.innerHTML = `<div class="launch-icon">${iconSvg}</div>`
+    if (action) {
+      const btn = document.createElement('button')
+      btn.className = 'launch-action'
+      btn.textContent = action
+      btn.addEventListener('click', () => this.handlers.onLaunchConfirm?.())
+      this.launchScreen.appendChild(btn)
+      return
+    }
+    this.launchScreen.insertAdjacentHTML('beforeend', '<div class="launch-spinner"></div><div class="launch-label"></div>')
     this.launchScreen.querySelector('.launch-label')!.textContent = label
   }
 
   hideLaunchScreen(): void {
     this.launchScreen?.remove()
     this.launchScreen = null
+  }
+
+  // 当前可见区域里是否有非空白字符
+  hasVisibleText(): boolean {
+    const buf = this.term.buffer.active
+    for (let y = 0; y < this.term.rows; y++) {
+      if (buf.getLine(buf.viewportY + y)?.translateToString(true).trim()) {
+        return true
+      }
+    }
+    return false
   }
 
   // ── PTY 生命周期 ──

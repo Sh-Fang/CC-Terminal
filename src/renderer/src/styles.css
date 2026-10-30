@@ -786,6 +786,17 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   animation: cv-spin 0.8s linear infinite;
 }
 .launch-label { font-size: 13px; opacity: 0.7; }
+.launch-action {
+  height: 34px; padding: 0 18px;
+  border-radius: var(--r-full);
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.launch-action:hover { opacity: 1; background: color-mix(in srgb, currentColor 10%, transparent); }
 .xterm, .xterm-viewport, .xterm-screen { height: 100%; }
 /* IME 组合时 xterm 会把 helper-textarea 设可见并贴在光标格上。
    光标靠近右边缘且预编辑字符串很长 → textarea 视觉矩形会冲出 term-host，

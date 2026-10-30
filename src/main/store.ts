@@ -42,6 +42,7 @@ function str(v: unknown): string | undefined {
 function normalize(raw: unknown): StoreData {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const groups: GroupRec[] = []
+  const rawClosedMissing = new Set<string>()
   for (const g of Array.isArray(r.groups) ? r.groups : []) {
     const o = g as Record<string, unknown>
     if (!str(o?.id) || typeof o.cwd !== 'string') {
@@ -52,8 +53,13 @@ function normalize(raw: unknown): StoreData {
       name: str(o.name) ?? (o.cwd as string),
       cwd: o.cwd as string,
       collapsed: o.collapsed === true,
-      tabIds: Array.isArray(o.tabIds) ? o.tabIds.filter((x): x is string => typeof x === 'string') : []
+      tabIds: Array.isArray(o.tabIds) ? o.tabIds.filter((x): x is string => typeof x === 'string') : [],
+      closed: o.closed === true
     })
+    // 旧数据没有 closed：没有打开的标签页即视为已关闭
+    if (typeof o.closed !== 'boolean') {
+      rawClosedMissing.add(o.id as string)
+    }
   }
   const tabs: TabRec[] = []
   for (const t of Array.isArray(r.tabs) ? r.tabs : []) {
@@ -89,6 +95,11 @@ function normalize(raw: unknown): StoreData {
       ccTitle: str(o.ccTitle),
       firstPrompt: str(o.firstPrompt)
     })
+  }
+  for (const g of groups) {
+    if (rawClosedMissing.has(g.id)) {
+      g.closed = !tabs.some((x) => x.groupId === g.id && !x.closedAt)
+    }
   }
   return { version: 1, groups, tabs, sessions, activeTabId: str(r.activeTabId) ?? null }
 }
@@ -241,7 +252,7 @@ export function applyOp(o: StoreOp): StoreSnapshot {
   switch (o.op) {
     case 'createGroup': {
       if (!groupOf(o.id)) {
-        d.groups.push({ id: o.id, name: o.name, cwd: o.cwd, collapsed: false, tabIds: [] })
+        d.groups.push({ id: o.id, name: o.name, cwd: o.cwd, collapsed: false, tabIds: [], closed: false })
       }
       break
     }
@@ -266,6 +277,13 @@ export function applyOp(o: StoreOp): StoreSnapshot {
       d.groups = [...picked, ...d.groups.filter((g) => !o.ids.includes(g.id))]
       break
     }
+    case 'closeGroup': {
+      const g = groupOf(o.id)
+      if (g) {
+        g.closed = true
+      }
+      break
+    }
     case 'createTab': {
       const g = groupOf(o.groupId)
       if (g && !tabOf(o.id)) {
@@ -281,6 +299,7 @@ export function applyOp(o: StoreOp): StoreSnapshot {
         })
         g.tabIds.push(o.id)
         g.collapsed = false
+        g.closed = false
       }
       break
     }
@@ -335,12 +354,13 @@ export function applyOp(o: StoreOp): StoreSnapshot {
       const t = tabOf(o.id)
       if (t) {
         const g = groupOf(t.groupId)
-        // 分组此前已没有打开的标签页 → 重新出现时排到最后
-        if (g && !d.tabs.some((x) => x.groupId === g.id && !x.closedAt)) {
+        // 分组此前已关闭 → 重新出现时排到最后
+        if (g?.closed) {
           d.groups = [...d.groups.filter((x) => x.id !== g.id), g]
         }
         if (g) {
           g.collapsed = false
+          g.closed = false
         }
         t.closedAt = undefined
         t.lastSeenAt = nowIso()
