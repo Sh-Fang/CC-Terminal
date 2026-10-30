@@ -1,5 +1,4 @@
 import { isIsolated } from './dev-isolate'
-import './legacy-userdata'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, powerMonitor, shell, Tray } from 'electron'
 import { join } from 'node:path'
 import { registerPtyIpc } from './ipc'
