@@ -1,7 +1,8 @@
 {
   "name": "cc-terminal",
-  "version": "0.7.36",
+  "version": "0.7.37",
   "description": "适配 Claude Code 与 Codex 的多窗口管理终端",
+  "desktopName": "cc-terminal.desktop",
   "license": "MIT",
   "author": "Sh-Fang",
   "repository": {

@@ -28,6 +28,7 @@ files:
   # 只供打包器生成各平台图标，不进应用包
   - '!resources/icon-1024.png'
   - '!resources/icon-mac.png'
+  - '!resources/icons/**'
   - package.json
   - '!**/*.map'
   - '!**/test/**'
@@ -61,9 +62,16 @@ mac:
 dmg:
   artifactName: CC-Terminal-${version}-mac-${arch}.${ext}
 
+# 图标给多尺寸目录：hicolor 主题最大只登记到 512x512，单给 1024 图会装进不被扫描的目录，菜单里显示成默认齿轮
 linux:
-  icon: resources/icon-1024.png
+  icon: resources/icons
   category: Development
+  # 控制文件描述用纯英文：应用中心读 deb 描述时中文会变成问号；中文简介放进 .desktop 的 Comment[zh_CN]
+  synopsis: Multi-window terminal for Claude Code and Codex
+  description: A multi-window terminal manager built for Claude Code and Codex.
+  desktop:
+    entry:
+      Comment[zh_CN]: 适配 Claude Code 与 Codex 的多窗口管理终端
   # deb 包必填维护者
   maintainer: Sh-Fang <46022639+Sh-Fang@users.noreply.github.com>
   artifactName: CC-Terminal-${version}-linux-${arch}.${ext}
