@@ -1,24 +1,24 @@
-/* 自带更纱等宽 Fixed SC（OFL，见 assets/fonts/LICENSE-SarasaGothic.txt）：终端默认字体，各平台观感一致。
-   「Sarasa CJK」是同一份文件只覆盖中日韩字符，挂在界面等宽字体最前面，只统一中文、不改英文字形。 */
+/* 自带 JetBrains Maple Mono（OFL，见 assets/fonts/LICENSE-JetBrainsMapleMono.txt）：终端默认字体，各平台观感一致。
+   「JetBrains Maple CJK」是同一份文件只覆盖中日韩字符，挂在界面等宽字体最前面，只统一中文、不改英文字形。 */
 @font-face {
-  font-family: 'Sarasa Fixed SC';
-  src: url('./assets/fonts/SarasaFixedSC-Regular.woff2') format('woff2');
+  font-family: 'JetBrains Maple Mono';
+  src: url('./assets/fonts/JetBrainsMapleMono-Regular.woff2') format('woff2');
   font-weight: 400;
 }
 @font-face {
-  font-family: 'Sarasa Fixed SC';
-  src: url('./assets/fonts/SarasaFixedSC-Bold.woff2') format('woff2');
+  font-family: 'JetBrains Maple Mono';
+  src: url('./assets/fonts/JetBrainsMapleMono-Bold.woff2') format('woff2');
   font-weight: 700;
 }
 @font-face {
-  font-family: 'Sarasa CJK';
-  src: url('./assets/fonts/SarasaFixedSC-Regular.woff2') format('woff2');
+  font-family: 'JetBrains Maple CJK';
+  src: url('./assets/fonts/JetBrainsMapleMono-Regular.woff2') format('woff2');
   font-weight: 400;
   unicode-range: U+2E80-2FDF, U+3000-303F, U+3040-30FF, U+3100-312F, U+31A0-31FF, U+3200-33FF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
 }
 @font-face {
-  font-family: 'Sarasa CJK';
-  src: url('./assets/fonts/SarasaFixedSC-Bold.woff2') format('woff2');
+  font-family: 'JetBrains Maple CJK';
+  src: url('./assets/fonts/JetBrainsMapleMono-Bold.woff2') format('woff2');
   font-weight: 700;
   unicode-range: U+2E80-2FDF, U+3000-303F, U+3040-30FF, U+3100-312F, U+31A0-31FF, U+3200-33FF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
 }
@@ -45,7 +45,7 @@
   --g-prev-end: #ff0080;
 
   --sans: 'Geist', 'Inter', system-ui, -apple-system, sans-serif;
-  --mono: 'Sarasa CJK', 'Geist Mono', 'JetBrains Mono', 'Cascadia Code', ui-monospace, Consolas, monospace;
+  --mono: 'JetBrains Maple CJK', 'Geist Mono', 'JetBrains Mono', 'Cascadia Code', ui-monospace, Consolas, monospace;
 
   --r-xs: 4px;
   --r-sm: 6px;

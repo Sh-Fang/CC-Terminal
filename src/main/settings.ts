@@ -51,7 +51,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
   font: {
-    family: '"Sarasa Fixed SC", monospace',
+    family: '"JetBrains Maple Mono", monospace',
     size: 14,
     lineHeight: 1.2
   },
@@ -106,8 +106,11 @@ function coord(v: unknown): number | null {
   return Math.min(100000, Math.max(-100000, n))
 }
 
-// 旧版默认字体：仍是它的设置换成自带字体，用户自己改过的不动
-const LEGACY_FONT_FAMILY = '"Cascadia Code", "JetBrains Mono", Consolas, monospace'
+// 历代默认字体：仍是其中之一的设置换成当前自带字体，用户自己改过的不动
+const LEGACY_FONT_FAMILIES = new Set([
+  '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
+  '"Sarasa Fixed SC", monospace'
+])
 
 function normalize(raw: unknown): Settings {
   if (!raw || typeof raw !== 'object') return DEFAULT_SETTINGS
@@ -121,7 +124,7 @@ function normalize(raw: unknown): Settings {
     version: 1,
     font: {
       family:
-        typeof font.family === 'string' && font.family.trim() && font.family.trim() !== LEGACY_FONT_FAMILY
+        typeof font.family === 'string' && font.family.trim() && !LEGACY_FONT_FAMILIES.has(font.family.trim())
           ? font.family
           : DEFAULT_SETTINGS.font.family,
       size: clampNum(font.size, 8, 40, DEFAULT_SETTINGS.font.size),

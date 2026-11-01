@@ -38,7 +38,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
   font: {
-    family: '"Sarasa Fixed SC", monospace',
+    family: '"JetBrains Maple Mono", monospace',
     size: 14,
     lineHeight: 1.2
   },
@@ -65,7 +65,7 @@ export const DEFAULT_SETTINGS: Settings = {
 }
 
 // 应用自带的终端字体（styles.css 里 @font-face 声明）
-export const BUNDLED_MONO = 'Sarasa Fixed SC'
+export const BUNDLED_MONO = 'JetBrains Maple Mono'
 const GENERIC_FONTS = new Set(['monospace', 'ui-monospace', 'sans-serif', 'serif', 'system-ui'])
 
 // 用户字体后面补上自带字体：用户的英文字体没有中文或符号时也统一用它，不掉到各平台的系统字体。
