@@ -3,6 +3,8 @@ import { app } from 'electron'
 // 开发隔离实例：TERMINAL_ISOLATE_DIR 指定独立 userData，单实例锁随之隔离；须在其它模块读 userData 前导入
 const isolateDir = process.env.TERMINAL_ISOLATE_DIR
 export const isIsolated = !!isolateDir
+// TERMINAL_ISOLATE_VISIBLE=1：隔离实例照常显示窗口，用来人工查看；默认全透明供自动化截图
+export const isIsolatedHidden = isIsolated && process.env.TERMINAL_ISOLATE_VISIBLE !== '1'
 
 if (isolateDir) {
   app.setPath('userData', isolateDir)

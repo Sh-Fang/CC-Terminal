@@ -14,7 +14,7 @@ export interface Settings {
   cursor: { style: CursorStyle; blink: boolean }
   terminal: { scrollback: number; theme: ThemePreset }
   appTheme: AppTheme
-  defaults: { cwd: string; autoLaunchCC: boolean }
+  defaults: { cwd: string }
   // true = 每次启动 cc（新建与 --resume 都算）都带 --dangerously-skip-permissions
   dangerousSkipPermissions: boolean
   claudePath: string
@@ -31,21 +31,21 @@ export interface Settings {
   floaterY: number | null
   tabBarMode: TabBarMode       // 标签栏布局：垂直（左栏分组）/ 水平（顶部平铺）
   language: AppLanguage        // 界面语言：zh = 简体中文（默认）；en = English。重启后生效
-  // Ctrl+P 全局搜索的类别开关：标签页标题 / 会话标题 / 路径（工作目录）
-  searchScopes: { tabTitle: boolean; sessionTitle: boolean; path: boolean }
+  // Ctrl+P 全局搜索的类别开关：分组 / 智能体标签页（含会话）/ 终端标签页 / 路径（工作目录）
+  searchScopes: { group: boolean; agent: boolean; terminal: boolean; path: boolean }
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
   font: {
-    family: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
+    family: '"Sarasa Fixed SC", monospace',
     size: 14,
     lineHeight: 1.2
   },
   cursor: { style: 'block', blink: true },
   terminal: { scrollback: 5000, theme: 'vscode-dark' },
   appTheme: 'light',
-  defaults: { cwd: '', autoLaunchCC: false },
+  defaults: { cwd: '' },
   dangerousSkipPermissions: false,
   claudePath: '',
   npmRegistry: 'https://registry.npmmirror.com',
@@ -61,7 +61,33 @@ export const DEFAULT_SETTINGS: Settings = {
   floaterY: null,
   tabBarMode: 'vertical',
   language: 'zh',
-  searchScopes: { tabTitle: true, sessionTitle: true, path: false }
+  searchScopes: { group: true, agent: true, terminal: true, path: false }
+}
+
+// 应用自带的终端字体（styles.css 里 @font-face 声明）
+export const BUNDLED_MONO = 'Sarasa Fixed SC'
+const GENERIC_FONTS = new Set(['monospace', 'ui-monospace', 'sans-serif', 'serif', 'system-ui'])
+
+// 用户字体后面补上自带字体：用户的英文字体没有中文或符号时也统一用它，不掉到各平台的系统字体。
+// 插在末尾的通用字体族之前，否则 monospace 会先接住这些字符
+export function terminalFontFamily(family: string): string {
+  const parts = family.split(',').map((x) => x.trim()).filter(Boolean)
+  const bare = (x: string): string => x.replace(/^["']|["']$/g, '')
+  if (parts.some((x) => bare(x) === BUNDLED_MONO)) return family
+  let i = parts.length
+  while (i > 0 && GENERIC_FONTS.has(bare(parts[i - 1]).toLowerCase())) i--
+  parts.splice(i, 0, `"${BUNDLED_MONO}"`)
+  return parts.join(', ')
+}
+
+// 终端打开前先把自带字体加载好：xterm 在 open 时量格子宽度，字体没到位会按回退字体量错
+export async function loadBundledFonts(): Promise<void> {
+  try {
+    await Promise.all([
+      document.fonts.load(`14px "${BUNDLED_MONO}"`, '中a'),
+      document.fonts.load(`bold 14px "${BUNDLED_MONO}"`, '中a')
+    ])
+  } catch {}
 }
 
 export const THEMES: Record<ThemePreset, ITheme & { label: string; backgroundCss: string }> = {

@@ -1,3 +1,28 @@
+/* 自带更纱等宽 Fixed SC（OFL，见 assets/fonts/LICENSE-SarasaGothic.txt）：终端默认字体，各平台观感一致。
+   「Sarasa CJK」是同一份文件只覆盖中日韩字符，挂在界面等宽字体最前面，只统一中文、不改英文字形。 */
+@font-face {
+  font-family: 'Sarasa Fixed SC';
+  src: url('./assets/fonts/SarasaFixedSC-Regular.woff2') format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'Sarasa Fixed SC';
+  src: url('./assets/fonts/SarasaFixedSC-Bold.woff2') format('woff2');
+  font-weight: 700;
+}
+@font-face {
+  font-family: 'Sarasa CJK';
+  src: url('./assets/fonts/SarasaFixedSC-Regular.woff2') format('woff2');
+  font-weight: 400;
+  unicode-range: U+2E80-2FDF, U+3000-303F, U+3040-30FF, U+3100-312F, U+31A0-31FF, U+3200-33FF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
+@font-face {
+  font-family: 'Sarasa CJK';
+  src: url('./assets/fonts/SarasaFixedSC-Bold.woff2') format('woff2');
+  font-weight: 700;
+  unicode-range: U+2E80-2FDF, U+3000-303F, U+3040-30FF, U+3100-312F, U+31A0-31FF, U+3200-33FF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
+
 :root {
   --ink: #171717;
   --body: #4d4d4d;
@@ -20,7 +45,7 @@
   --g-prev-end: #ff0080;
 
   --sans: 'Geist', 'Inter', system-ui, -apple-system, sans-serif;
-  --mono: 'Geist Mono', 'JetBrains Mono', 'Cascadia Code', ui-monospace, Consolas, monospace;
+  --mono: 'Sarasa CJK', 'Geist Mono', 'JetBrains Mono', 'Cascadia Code', ui-monospace, Consolas, monospace;
 
   --r-xs: 4px;
   --r-sm: 6px;
@@ -773,6 +798,9 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   overflow: hidden;
 }
 .term-host.active { display: block; }
+/* Chrome 默认会把连续的全角标点挤成半宽，xterm 重复多次量字宽时把标点量窄一半，
+   补的字距偏大，中文行越往右越偏：既冲出右边，鼠标选中也落到后面的字上 */
+.term-host .xterm { text-spacing-trim: space-all; }
 /* 启动画面：盖住整块终端，底色继承 term-host（终端配色），文字色取终端前景色 */
 .launch-screen {
   position: absolute;
@@ -1052,6 +1080,21 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 .field-check {
   margin: -2px 0 4px;
 }
+/* 新建标签页的类型：终端 / Claude Code / Codex 三选一，图标按钮 */
+.kind-pick { display: flex; gap: 8px; }
+.kind-opt {
+  width: 44px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--canvas);
+  color: var(--mute);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.kind-opt:hover { color: var(--ink); border-color: var(--hairline-strong); }
+.kind-opt.on { color: var(--ink); border-color: var(--ink); background: var(--canvas-soft-2); }
+.kind-opt:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 /* 不用 <label> 包裹：点说明文字不应触发开关（标题/说明是纯文字，可选中） */
 .field-check .fc-line {
   display: flex;

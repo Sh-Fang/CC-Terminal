@@ -1,4 +1,4 @@
-import { isIsolated } from './dev-isolate'
+import { isIsolated, isIsolatedHidden } from './dev-isolate'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, powerMonitor, shell, Tray } from 'electron'
 import { join } from 'node:path'
 import { registerPtyIpc } from './ipc'
@@ -14,6 +14,10 @@ import { logEvent, startLogging, stopLogging } from './app-log'
 import { setLanguage, t } from './i18n'
 import { setMainWindowGetter } from './windows'
 import { refreshMetaInBackground } from './store'
+import { mergeLoginShellPath } from './sys-env'
+
+// 先补全 PATH 再做别的：之后起的 npm、node 等子进程都继承它
+mergeLoginShellPath()
 
 // 界面语言启动时定死，切换走 app:relaunch 重启生效
 try { setLanguage(loadSettings().language) } catch {}
@@ -233,7 +237,7 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     // 隔离实例：全透明、鼠标穿透、不可聚焦、不进任务栏，留在屏幕内保证持续出帧可截图
-    if (isIsolated) {
+    if (isIsolatedHidden) {
       mainWindow?.setOpacity(0)
       mainWindow?.setIgnoreMouseEvents(true)
       mainWindow?.setFocusable(false)

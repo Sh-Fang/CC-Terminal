@@ -11,8 +11,9 @@ export interface HookPaths {
   eventsDir: string
   stateDir: string
   pwshProfilePs1: string  // Windows: pwsh shell-integration
-  zshProfile: string      // macOS: zsh shell-integration
-  bashProfile: string     // macOS: bash shell-integration
+  zshProfile: string      // 类 Unix: zsh shell-integration
+  zshDotDir: string       // 类 Unix: zsh 启动时临时指向的 ZDOTDIR，读完用户的启动文件再接入 zshProfile
+  bashProfile: string     // 类 Unix: bash shell-integration，兼作 --init-file
 }
 
 // 解析 node 绝对路径（cc 跑 hook 的 shell 不一定有 PATH）；
@@ -151,69 +152,6 @@ if ($env:__TERMINAL_SHELL_INTEG -ne '1') {
         }
     } catch {}
 }
-
-# cct: 手动启动一次能被 app 接管的 cc 会话。
-# - 复用 pty:create 时注入的 env：
-#   TERMINAL_TAB_ID / TERMINAL_HOOK_SETTINGS_JSON / TERMINAL_CLAUDE_PATH
-# - 无参 → --session-id <新 uuid>：新会话，hook 上报后 app 压栈
-# - -r / --resume → --resume：cc 自己弹选择器让用户选历史会话
-# - 其余参数原样透传给 claude（可 cct --model xxx 等）
-function Global:cct {
-    if (-not $env:TERMINAL_TAB_ID) {
-        Write-Host "cct: 需要在 CC Terminal 的 tab 里运行" -ForegroundColor Yellow
-        return
-    }
-    if (-not $env:TERMINAL_HOOK_SETTINGS_JSON -or -not (Test-Path $env:TERMINAL_HOOK_SETTINGS_JSON)) {
-        Write-Host "cct: 缺少 cc-hooks.json (TERMINAL_HOOK_SETTINGS_JSON)" -ForegroundColor Red
-        return
-    }
-    $isResume = $false
-    $passArgs = @()
-    foreach ($a in $args) {
-        if ($a -eq '-r' -or $a -eq '--resume') { $isResume = $true; continue }
-        $passArgs += $a
-    }
-    $claudeBin = if ($env:TERMINAL_CLAUDE_PATH) { $env:TERMINAL_CLAUDE_PATH } else { 'claude' }
-    $settingsArg = @('--settings', $env:TERMINAL_HOOK_SETTINGS_JSON)
-    # app 设置里开了「默认危险模式」→ pty:create 注入 TERMINAL_CC_DANGEROUS=1
-    if ($env:TERMINAL_CC_DANGEROUS -eq '1') { $settingsArg += '--dangerously-skip-permissions' }
-    if ($isResume) {
-        & $claudeBin @settingsArg --resume @passArgs
-    } else {
-        $sid = [guid]::NewGuid().ToString()
-        & $claudeBin @settingsArg --session-id $sid @passArgs
-    }
-}
-`
-
-// cct（POSIX 版，zsh/bash 通用）：手动启动可被 app 接管的 cc 会话，语义与 pwsh 版一致。
-const CCT_SH = `cct() {
-  if [ -z "$TERMINAL_TAB_ID" ]; then
-    printf '%s\\n' "cct: 需要在 CC Terminal 的 tab 里运行"; return 1
-  fi
-  if [ -z "$TERMINAL_HOOK_SETTINGS_JSON" ] || [ ! -f "$TERMINAL_HOOK_SETTINGS_JSON" ]; then
-    printf '%s\\n' "cct: 缺少 cc-hooks.json (TERMINAL_HOOK_SETTINGS_JSON)"; return 1
-  fi
-  local is_resume=0
-  local pass=()
-  local a
-  for a in "$@"; do
-    if [ "$a" = "-r" ] || [ "$a" = "--resume" ]; then is_resume=1; continue; fi
-    pass+=("$a")
-  done
-  local claude_bin=\${TERMINAL_CLAUDE_PATH:-claude}
-  # app 设置里开了「默认危险模式」→ pty:create 注入 TERMINAL_CC_DANGEROUS=1
-  local danger=()
-  [ "$TERMINAL_CC_DANGEROUS" = "1" ] && danger=(--dangerously-skip-permissions)
-  if [ "$is_resume" -eq 1 ]; then
-    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" --resume "\${pass[@]}"
-  else
-    local sid
-    sid=$(uuidgen 2>/dev/null | tr 'A-Z' 'a-z')
-    [ -z "$sid" ] && sid=$(node -e 'console.log(require("crypto").randomUUID())' 2>/dev/null)
-    "$claude_bin" --settings "$TERMINAL_HOOK_SETTINGS_JSON" "\${danger[@]}" --session-id "$sid" "\${pass[@]}"
-  fi
-}
 `
 
 // zsh shell-integration：preexec/precmd hook 发同一套 OSC 序列；__TERMINAL_SHELL_INTEG 防重复注入。
@@ -245,11 +183,19 @@ if [ -z "$__TERMINAL_SHELL_INTEG" ]; then
     precmd_functions+=(__terminal_precmd)
   fi
 fi
-
-${CCT_SH}`
+`
 
 // bash shell-integration：无内建 preexec/precmd，用 DEBUG trap + PROMPT_COMMAND 近似（best-effort）。
+// 作为 --init-file 启动时 bash 不是登录 shell，开头按登录 shell 的顺序补读系统与用户的启动文件。
 const BASH_PROFILE = `# CC Terminal · bash shell integration (best-effort)
+if [ -n "$__CCT_BASH_LOGIN" ]; then
+  unset __CCT_BASH_LOGIN
+  if [ -r /etc/profile ]; then . /etc/profile; fi
+  if [ -r ~/.bash_profile ]; then . ~/.bash_profile
+  elif [ -r ~/.bash_login ]; then . ~/.bash_login
+  elif [ -r ~/.profile ]; then . ~/.profile
+  fi
+fi
 if [ -z "$__TERMINAL_SHELL_INTEG" ] && [[ "$-" == *i* ]]; then
   export __TERMINAL_SHELL_INTEG=1
   __terminal_in_flight=0
@@ -284,8 +230,38 @@ if [ -z "$__TERMINAL_SHELL_INTEG" ] && [[ "$-" == *i* ]]; then
   PROMPT_COMMAND=__terminal_prompt_cmd
   trap '__terminal_debug' DEBUG
 fi
+`
 
-${CCT_SH}`
+// zsh 的 ZDOTDIR 接管：每个启动文件先切回用户的 ZDOTDIR 读用户自己的，再切回来；
+// .zshrc 读完后接入 shell-integration 并还原 ZDOTDIR，之后的 .zlogin / .zlogout 由 zsh 直接读用户的。
+function posixQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`
+}
+
+const zshStage = (file: string): string => `ZDOTDIR=$__cct_user_zdotdir
+if [[ -f "$ZDOTDIR/${file}" ]]; then . "$ZDOTDIR/${file}"; fi
+__cct_user_zdotdir=$ZDOTDIR`
+
+function writeZshDotDir(dir: string, integration: string): void {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, '.zshenv'), `# CC Terminal 生成
+__cct_zdotdir=$ZDOTDIR
+__cct_user_zdotdir=\${__CCT_USER_ZDOTDIR:-$HOME}
+unset __CCT_USER_ZDOTDIR
+${zshStage('.zshenv')}
+ZDOTDIR=$__cct_zdotdir
+`, 'utf8')
+  writeFileSync(join(dir, '.zprofile'), `# CC Terminal 生成
+${zshStage('.zprofile')}
+ZDOTDIR=$__cct_zdotdir
+`, 'utf8')
+  writeFileSync(join(dir, '.zshrc'), `# CC Terminal 生成
+${zshStage('.zshrc')}
+. ${posixQuote(integration)}
+if [[ "$ZDOTDIR" == "$HOME" ]]; then unset ZDOTDIR; fi
+unset __cct_zdotdir __cct_user_zdotdir
+`, 'utf8')
+}
 
 export function ensureHookAssets(): HookPaths {
   const userData = app.getPath('userData')
@@ -301,11 +277,13 @@ export function ensureHookAssets(): HookPaths {
   const pwshProfilePs1 = join(userData, 'shell-integration.ps1')
   const zshProfile = join(userData, 'shell-integration.zsh')
   const bashProfile = join(userData, 'shell-integration.bash')
+  const zshDotDir = join(userData, 'zsh')
   writeFileSync(sessionProbeJs, sessionProbeSource('process.argv[2]'), 'utf8')
   writeFileSync(stateProbeJs, stateProbeSource('process.argv[2]', 'process.argv[3]'), 'utf8')
   writeFileSync(pwshProfilePs1, PWSH_PROFILE_PS1, 'utf8')
   writeFileSync(zshProfile, ZSH_PROFILE, 'utf8')
   writeFileSync(bashProfile, BASH_PROFILE, 'utf8')
+  writeZshDotDir(zshDotDir, zshProfile)
 
   const nodePath = detectNodePath()
   const sessionCmd = `"${nodePath}" "${sessionProbeJs}" "${eventsDir}"`
@@ -347,7 +325,7 @@ export function ensureHookAssets(): HookPaths {
 
   try { writeCodexProfile(nodePath) } catch {}
 
-  return { ccHooksJson, sessionProbeJs, stateProbeJs, eventsDir, stateDir, pwshProfilePs1, zshProfile, bashProfile }
+  return { ccHooksJson, sessionProbeJs, stateProbeJs, eventsDir, stateDir, pwshProfilePs1, zshProfile, zshDotDir, bashProfile }
 }
 
 // Codex 的 hooks 写成一份独立 profile（$CODEX_HOME/cc-terminal.config.toml），只在 codex -p 时叠加，

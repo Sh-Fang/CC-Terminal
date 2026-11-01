@@ -27,7 +27,6 @@ export interface Settings {
   appTheme: AppTheme  // 应用主题，与终端主题相互独立
   defaults: {
     cwd: string
-    autoLaunchCC: boolean
   }
   // true = 每次启动 cc（新建会话与 --resume 都算）都带 --dangerously-skip-permissions
   dangerousSkipPermissions: boolean
@@ -45,21 +44,21 @@ export interface Settings {
   floaterY: number | null
   tabBarMode: TabBarMode       // 标签栏布局：vertical = 左栏分组（默认）；horizontal = 顶部平铺
   language: AppLanguage        // 界面语言：zh = 简体中文（默认）；en = English。重启后生效
-  // Ctrl+P 全局搜索的类别开关：标签页标题 / 会话标题 / 路径（工作目录）
-  searchScopes: { tabTitle: boolean; sessionTitle: boolean; path: boolean }
+  // Ctrl+P 全局搜索的类别开关：分组 / 智能体标签页（含会话）/ 终端标签页 / 路径（工作目录）
+  searchScopes: { group: boolean; agent: boolean; terminal: boolean; path: boolean }
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
   font: {
-    family: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
+    family: '"Sarasa Fixed SC", monospace',
     size: 14,
     lineHeight: 1.2
   },
   cursor: { style: 'block', blink: true },
   terminal: { scrollback: 5000, theme: 'vscode-dark' },
   appTheme: 'light',
-  defaults: { cwd: '', autoLaunchCC: false },
+  defaults: { cwd: '' },
   dangerousSkipPermissions: false,
   claudePath: '',
   npmRegistry: 'https://registry.npmmirror.com',
@@ -75,7 +74,7 @@ export const DEFAULT_SETTINGS: Settings = {
   floaterY: null,
   tabBarMode: 'vertical',
   language: 'zh',
-  searchScopes: { tabTitle: true, sessionTitle: true, path: false }
+  searchScopes: { group: true, agent: true, terminal: true, path: false }
 }
 
 const FILE = (): string => join(app.getPath('userData'), 'settings.json')
@@ -107,6 +106,9 @@ function coord(v: unknown): number | null {
   return Math.min(100000, Math.max(-100000, n))
 }
 
+// 旧版默认字体：仍是它的设置换成自带字体，用户自己改过的不动
+const LEGACY_FONT_FAMILY = '"Cascadia Code", "JetBrains Mono", Consolas, monospace'
+
 function normalize(raw: unknown): Settings {
   if (!raw || typeof raw !== 'object') return DEFAULT_SETTINGS
   const r = raw as Record<string, unknown>
@@ -118,7 +120,10 @@ function normalize(raw: unknown): Settings {
   return {
     version: 1,
     font: {
-      family: typeof font.family === 'string' && font.family.trim() ? font.family : DEFAULT_SETTINGS.font.family,
+      family:
+        typeof font.family === 'string' && font.family.trim() && font.family.trim() !== LEGACY_FONT_FAMILY
+          ? font.family
+          : DEFAULT_SETTINGS.font.family,
       size: clampNum(font.size, 8, 40, DEFAULT_SETTINGS.font.size),
       lineHeight: clampNum(font.lineHeight, 1.0, 2.0, DEFAULT_SETTINGS.font.lineHeight)
     },
@@ -133,8 +138,7 @@ function normalize(raw: unknown): Settings {
     },
     appTheme: pick(r.appTheme, APP_THEMES, DEFAULT_SETTINGS.appTheme),
     defaults: {
-      cwd: typeof def.cwd === 'string' ? def.cwd : DEFAULT_SETTINGS.defaults.cwd,
-      autoLaunchCC: typeof def.autoLaunchCC === 'boolean' ? def.autoLaunchCC : DEFAULT_SETTINGS.defaults.autoLaunchCC
+      cwd: typeof def.cwd === 'string' ? def.cwd : DEFAULT_SETTINGS.defaults.cwd
     },
     dangerousSkipPermissions:
       typeof r.dangerousSkipPermissions === 'boolean'
@@ -165,8 +169,9 @@ function normalize(raw: unknown): Settings {
     tabBarMode: pick(r.tabBarMode, TABBAR_MODES, DEFAULT_SETTINGS.tabBarMode),
     language: pick(r.language, LANGUAGES, DEFAULT_SETTINGS.language),
     searchScopes: {
-      tabTitle: bool(scopes.tabTitle, DEFAULT_SETTINGS.searchScopes.tabTitle),
-      sessionTitle: bool(scopes.sessionTitle, DEFAULT_SETTINGS.searchScopes.sessionTitle),
+      group: bool(scopes.group, DEFAULT_SETTINGS.searchScopes.group),
+      agent: bool(scopes.agent, DEFAULT_SETTINGS.searchScopes.agent),
+      terminal: bool(scopes.terminal, DEFAULT_SETTINGS.searchScopes.terminal),
       path: bool(scopes.path, DEFAULT_SETTINGS.searchScopes.path)
     }
   }

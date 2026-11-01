@@ -1,4 +1,4 @@
-// Ctrl+P 全局搜索：无关键字时列出近 7 天关闭的标签页，有关键字时按搜索类别分组列出结果。
+// Ctrl+P 全局搜索：无关键字时列出近 7 天关闭的标签页，有关键字时按搜索类别分组列出结果；两种情况都受类别开关筛选。
 // 输入框下方的类别开关写进设置，下次打开沿用。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as RKeyboardEvent, MouseEvent as RMouseEvent } from 'react'
@@ -9,19 +9,14 @@ import { formatTs, highlightRanges } from '../lib/format'
 import { icon } from '../svg-icons'
 import { t } from '../i18n'
 
-type ScopeKey = 'tabTitle' | 'sessionTitle' | 'path'
+type ScopeKey = 'group' | 'agent' | 'terminal' | 'path'
 
 const SCOPES: { key: ScopeKey; label: string }[] = [
-  { key: 'tabTitle', label: '标签页标题' },
-  { key: 'sessionTitle', label: '会话标题' },
+  { key: 'group', label: '分组' },
+  { key: 'agent', label: '智能体' },
+  { key: 'terminal', label: '终端' },
   { key: 'path', label: '路径' }
 ]
-
-const KIND_ICON: Record<QuickItem['kind'], 'layers' | 'clock' | 'folder'> = {
-  tab: 'layers',
-  session: 'clock',
-  path: 'folder'
-}
 
 function QuickOpenBody() {
   const rev = useAppStore((s) => s.rev)
@@ -34,7 +29,7 @@ function QuickOpenBody() {
 
   // rev 变化（如后台补齐了会话标题）时重算结果
   const groups = useMemo(
-    () => (query.trim() ? quickSearch(query, scopes) : getQuickHistory()),
+    () => (query.trim() ? quickSearch(query, scopes) : getQuickHistory(scopes)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [query, scopes, rev]
   )
@@ -146,7 +141,7 @@ function QuickOpenBody() {
                     }}
                     onClick={() => run(it)}
                   >
-                    <span className="qo-ic" dangerouslySetInnerHTML={{ __html: icon(KIND_ICON[it.kind], { size: 14 }) }} />
+                    <span className="qo-ic" dangerouslySetInnerHTML={{ __html: icon(it.icon, { size: 14 }) }} />
                     <span className="qo-title" dangerouslySetInnerHTML={{ __html: highlightRanges(it.title, it.titleHl) }} />
                     <span className="qo-sub">{it.sub}</span>
                     {it.closedAt && <span className="qo-when">{formatTs(it.closedAt)}</span>}

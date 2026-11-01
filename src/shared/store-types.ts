@@ -26,6 +26,8 @@ export interface TabRec {
   groupId: string
   name: string
   autoLaunchCC: boolean
+  // 还没有主会话时要启动的智能体；有主会话后跟随主会话所属的智能体
+  agent?: AgentKind
   memo?: string
   stack: string[]
   openedAt: string
@@ -71,9 +73,9 @@ export type StoreOp =
   | { op: 'setCollapsed'; ids: string[]; collapsed: boolean }
   | { op: 'reorderGroups'; ids: string[] }
   | { op: 'closeGroup'; id: string }
-  | { op: 'createTab'; id: string; groupId: string; name: string; autoLaunchCC: boolean; stack?: string[] }
+  | { op: 'createTab'; id: string; groupId: string; name: string; autoLaunchCC: boolean; agent?: AgentKind; stack?: string[] }
   | { op: 'renameTab'; id: string; name: string }
-  | { op: 'setAutoLaunch'; id: string; autoLaunchCC: boolean }
+  | { op: 'setAutoLaunch'; id: string; autoLaunchCC: boolean; agent?: AgentKind }
   | { op: 'setMemo'; id: string; memo: string | null }
   | { op: 'reorderTabs'; groupId: string; ids: string[] }
   | { op: 'closeTabs'; ids: string[] }

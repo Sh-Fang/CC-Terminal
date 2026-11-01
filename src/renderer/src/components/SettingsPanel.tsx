@@ -119,7 +119,6 @@ interface Form {
   closeBehavior: string;
   cursor: CursorStyle;
   cursorBlink: boolean;
-  defaultCC: boolean;
   dangerMode: boolean;
   disableUpd: boolean;
   showFloater: boolean;
@@ -142,7 +141,6 @@ function formFromSettings(s: Settings): Form {
     closeBehavior: s.closeBehavior || "quit",
     cursor: s.cursor.style,
     cursorBlink: s.cursor.blink,
-    defaultCC: s.defaults.autoLaunchCC,
     dangerMode: s.dangerousSkipPermissions,
     disableUpd: s.disableAutoupdater,
     showFloater: s.showFloater,
@@ -421,7 +419,6 @@ export function SettingsPanel() {
       defaults: {
         // cwd 预填靠 lastUsedCwd 自动记忆，面板不提供手动默认路径
         cwd: cur.defaults.cwd,
-        autoLaunchCC: f.defaultCC,
       },
       dangerousSkipPermissions: f.dangerMode,
       // claudePath 由 CC 版本管理维护，面板不直接编辑（...cur 已带上）
@@ -1527,15 +1524,6 @@ export function SettingsPanel() {
               hidden={section !== "claude"}
             >
               <ClaudeAccountSection active={open && section === "claude"} />
-              <div className="set-row set-row-toggle">
-                <label>{t("新建标签默认启动 Claude Code")}</label>
-                <input
-                  id="set-default-cc"
-                  type="checkbox"
-                  checked={form.defaultCC}
-                  onChange={(e) => commit({ defaultCC: e.target.checked })}
-                />
-              </div>
               <div className="set-row set-row-toggle">
                 <label>{t("默认以危险模式启动")}</label>
                 <input

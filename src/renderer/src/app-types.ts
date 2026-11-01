@@ -1,3 +1,4 @@
+import type { IconName } from './svg-icons'
 // 跨模块共享的视图类型，controller 与各组件统一从此导入
 
 import type { TerminalTab, SessionRecord } from './terminal-tab'
@@ -29,7 +30,9 @@ export interface HistoryEntry {
 // Ctrl+P 全局搜索的一条结果；titleHl 是 title 上的命中区间
 export interface QuickItem {
   key: string
-  kind: 'tab' | 'session' | 'path'
+  kind: 'group' | 'agent' | 'terminal' | 'session' | 'path'
+  // 沿用侧栏的图标：分组是文件夹，智能体按所属智能体，终端是终端图标
+  icon: IconName
   title: string
   titleHl?: Range[]
   sub: string

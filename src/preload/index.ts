@@ -50,6 +50,7 @@ export interface HookPaths {
   stateDir: string
   pwshProfilePs1: string
   zshProfile: string
+  zshDotDir: string
   bashProfile: string
 }
 
@@ -66,7 +67,7 @@ export interface Settings {
   cursor: { style: CursorStyle; blink: boolean }
   terminal: { scrollback: number; theme: ThemePreset }
   appTheme: AppTheme
-  defaults: { cwd: string; autoLaunchCC: boolean }
+  defaults: { cwd: string }
   dangerousSkipPermissions: boolean
   claudePath: string
   npmRegistry: string
@@ -82,7 +83,7 @@ export interface Settings {
   floaterY: number | null
   tabBarMode: TabBarMode
   language: AppLanguage
-  searchScopes: { tabTitle: boolean; sessionTitle: boolean; path: boolean }
+  searchScopes: { group: boolean; agent: boolean; terminal: boolean; path: boolean }
 }
 
 export interface FloaterCounts {

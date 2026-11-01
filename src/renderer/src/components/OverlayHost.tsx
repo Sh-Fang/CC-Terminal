@@ -10,7 +10,8 @@ import {
   resolveConfirm,
   type CtxItem,
   type MemoEditorOpts,
-  type ModalOpts
+  type ModalOpts,
+  type NewTabKind
 } from '../state/overlays'
 import { t } from '../i18n'
 import { icon } from '../svg-icons'
@@ -153,6 +154,12 @@ function basenameOfPath(p: string): string {
   return segs[segs.length - 1] ?? ''
 }
 
+const KIND_OPTIONS: { kind: NewTabKind; icon: 'terminal' | 'claude' | 'codex'; label: string }[] = [
+  { kind: 'terminal', icon: 'terminal', label: '终端' },
+  { kind: 'claude', icon: 'claude', label: 'Claude Code' },
+  { kind: 'codex', icon: 'codex', label: 'Codex' }
+]
+
 function ModalBody({ cfg }: { cfg: ModalOpts }) {
   // 自动按 cwd 末段填 name，直到用户手动改过 name 为止
   const [name, setName] = useState(() => {
@@ -164,7 +171,7 @@ function ModalBody({ cfg }: { cfg: ModalOpts }) {
   })
   const [cwd, setCwd] = useState(cfg.cwd ?? '')
   const [tabName, setTabName] = useState(cfg.tabName ?? 'A')
-  const [cc, setCc] = useState(cfg.ccChecked ?? true)
+  const [kind, setKind] = useState<NewTabKind>('terminal')
   const [picking, setPicking] = useState(false)
   const nameUserEditedRef = useRef(false)
   const nameRef = useRef<HTMLInputElement>(null)
@@ -187,7 +194,7 @@ function ModalBody({ cfg }: { cfg: ModalOpts }) {
     const v = {
       name: name.trim(),
       cwd: cfg.kind === 'new-group' || cfg.kind === 'new-tab' ? cwd.trim() : undefined,
-      autoLaunchCC: cfg.kind === 'new-group' || cfg.kind === 'new-tab' ? cc : undefined,
+      kind: cfg.showKind ? kind : undefined,
       tabName: cfg.showTabName ? tabName.trim() : undefined
     }
     if (!v.name) {
@@ -204,7 +211,7 @@ function ModalBody({ cfg }: { cfg: ModalOpts }) {
   }
 
   // Enter 全局兜底：焦点不在文本框（文本框自行处理）时也能直接回车提交，
-  // 比如勾完 CC 复选框或点完「浏览」后；按钮聚焦时交给按钮原生行为
+  // 比如点完「浏览」后；按钮聚焦时交给按钮原生行为
   const submitRef = useRef(submit)
   submitRef.current = submit
   useEffect(() => {
@@ -289,7 +296,7 @@ function ModalBody({ cfg }: { cfg: ModalOpts }) {
           </button>
         </div>
       </div>
-      {/* 首个标签名与 CC 开关相互独立，字段是否出现由调用方 showTabName 决定 */}
+      {/* 首个标签名与类型选择相互独立，字段是否出现由调用方 showTabName 决定 */}
       <div className="field" id="modal-tabname-field" style={cfg.showTabName ? undefined : { display: 'none' }}>
         <label>{t('标签名')}</label>
         <input
@@ -302,12 +309,27 @@ function ModalBody({ cfg }: { cfg: ModalOpts }) {
           onKeyDown={onKeyDown}
         />
       </div>
-      <div className="field-check" id="modal-cc-field" style={cfg.showCC ? undefined : { display: 'none' }}>
-        <span className="fc-line">
-          <input id="modal-cc" type="checkbox" checked={cc} onChange={(e) => setCc(e.target.checked)} />
-          <span>{t('启动 Claude Code')}</span>
-        </span>
-      </div>
+      {cfg.showKind && (
+        <div className="field" id="modal-kind-field">
+          <label>{t('类型')}</label>
+          <div className="kind-pick" role="radiogroup" aria-label={t('类型')}>
+            {KIND_OPTIONS.map((k) => (
+              <button
+                key={k.kind}
+                type="button"
+                role="radio"
+                aria-checked={kind === k.kind}
+                aria-label={t(k.label)}
+                title={t(k.label)}
+                className={'kind-opt' + (kind === k.kind ? ' on' : '')}
+                data-testid={`modal-kind-${k.kind}`}
+                onClick={() => setKind(k.kind)}
+                dangerouslySetInnerHTML={{ __html: icon(k.icon, { size: 18 }) }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
       <div className="actions">
         <button id="modal-cancel" className="btn btn-secondary" onClick={closeModal}>
           {t('取消')}

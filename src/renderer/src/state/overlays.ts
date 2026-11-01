@@ -15,19 +15,20 @@ export interface CtxItem {
 }
 
 export type ModalKind = 'new-group' | 'new-tab' | 'rename'
+// 新建标签页的类型：终端，或启动某个智能体
+export type NewTabKind = 'terminal' | 'claude' | 'codex'
 export interface ModalInput {
   kind: ModalKind
   title: string
   sub: string
   name: string
   cwd?: string
-  showCC?: boolean
-  ccChecked?: boolean
+  showKind?: boolean
   showTabName?: boolean
   tabName?: string
   okLabel?: string
   onPickCwd?: (currentValue: string) => Promise<string | null>
-  onOk: (v: { name: string; cwd?: string; autoLaunchCC?: boolean; tabName?: string }) => void
+  onOk: (v: { name: string; cwd?: string; kind?: NewTabKind; tabName?: string }) => void
   // true 时 name 跟随 cwd 自动取路径最后一段；用户动过 name 后停止跟随
   autoNameFromCwd?: boolean
 }

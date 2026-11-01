@@ -72,6 +72,7 @@ function normalize(raw: unknown): StoreData {
       groupId: o.groupId as string,
       name: str(o.name) ?? 'A',
       autoLaunchCC: o.autoLaunchCC === true,
+      agent: o.agent === 'claude' || o.agent === 'codex' ? o.agent : undefined,
       memo: str(o.memo),
       stack: Array.isArray(o.stack) ? o.stack.filter((x): x is string => typeof x === 'string') : [],
       openedAt: str(o.openedAt) ?? nowIso(),
@@ -293,6 +294,7 @@ export function applyOp(o: StoreOp): StoreSnapshot {
           groupId: o.groupId,
           name: o.name,
           autoLaunchCC: o.autoLaunchCC,
+          agent: o.agent,
           stack: o.stack ?? [],
           openedAt: ts,
           lastSeenAt: ts
@@ -314,6 +316,7 @@ export function applyOp(o: StoreOp): StoreSnapshot {
       const t = tabOf(o.id)
       if (t) {
         t.autoLaunchCC = o.autoLaunchCC
+        if (o.agent) t.agent = o.agent
       }
       break
     }

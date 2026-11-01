@@ -106,8 +106,28 @@ const ENV_SNAPSHOT_TTL_MS = 5000
 // 见过的注册表环境变量键：后续被用户删掉时，也要从冻结的 process.env 基底移除。
 const knownRegistryKeys = new Set<string>()
 
+// 从桌面图标、Dock 启动时主进程只有系统默认 PATH，nvm、Homebrew 等在 shell 启动文件里加的目录都没有，
+// npm 这类 #!/usr/bin/env node 脚本就找不到 node。启动时跑一次登录交互 shell 取它的 PATH，排在前面合并进来。
+export function mergeLoginShellPath(): void {
+  if (IS_WIN) return
+  const shell = process.env.SHELL || '/bin/zsh'
+  const mark = '__CCT_PATH__'
+  try {
+    const out = execFileSync(shell, ['-lic', `printf '%s' "${mark}\${PATH}${mark}"`], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore']
+    })
+    // 交互 shell 的启动文件可能先打印别的内容，按标记截取
+    const m = new RegExp(`${mark}(.*?)${mark}`).exec(out)
+    if (!m || !m[1]) return
+    const merged = new Set([...m[1].split(':'), ...(process.env.PATH ?? '').split(':')].filter(Boolean))
+    process.env.PATH = [...merged].join(':')
+  } catch {}
+}
+
 export function snapshotCurrentEnv(force = false): Record<string, string> {
-  // 非 Windows 直接返回主进程 env（pty 走登录 shell 自行补全 PATH）
+  // 非 Windows 直接返回主进程 env（PATH 已在启动时并入登录 shell 的 PATH）
   if (!IS_WIN) return { ...(process.env as Record<string, string>) }
   if (!force && envSnapshotCache && Date.now() - envSnapshotCache.at < ENV_SNAPSHOT_TTL_MS) {
     return { ...envSnapshotCache.env }

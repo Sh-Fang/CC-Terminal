@@ -3,7 +3,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { backgroundFor, themeForPreset, type Settings } from './themes'
+import { backgroundFor, terminalFontFamily, themeForPreset, type Settings } from './themes'
 import { t } from './i18n'
 
 export interface TermTabHandlers {
@@ -185,7 +185,7 @@ export class TerminalTab {
     this.host.style.background = backgroundFor(opts.settings.terminal.theme)
 
     this.term = new Terminal({
-      fontFamily: opts.settings.font.family,
+      fontFamily: terminalFontFamily(opts.settings.font.family),
       fontSize: opts.settings.font.size,
       lineHeight: opts.settings.font.lineHeight,
       cursorBlink: opts.settings.cursor.blink,
@@ -747,7 +747,7 @@ export class TerminalTab {
 
   applySettings(s: Settings): void {
     const opts = this.term.options
-    opts.fontFamily = s.font.family
+    opts.fontFamily = terminalFontFamily(s.font.family)
     opts.fontSize = s.font.size
     opts.lineHeight = s.font.lineHeight
     opts.cursorBlink = s.cursor.blink

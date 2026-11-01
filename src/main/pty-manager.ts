@@ -52,18 +52,13 @@ export interface CreateOpts {
   env?: Record<string, string>
   // 重新加载标签时跳过 5s 环境快照缓存，立刻读取当前系统环境变量
   freshEnv?: boolean
-  // 各平台 shell-integration 脚本路径；createPty 按 resolveShell() 选中的 shell 取用。
+  // 各平台 shell-integration 脚本路径（zsh 为 ZDOTDIR 目录）；createPty 按 resolveShell() 选中的 shell 取用。
   profiles?: Partial<Record<ProfileKey, string>>
 }
 
 // pwsh 单引号字符串里嵌单引号：写两个单引号转义
 function quoteSingle(s: string): string {
   return `'${s.replace(/'/g, "''")}'`
-}
-
-// POSIX 单引号转义：'\'' 收尾一段、插一个字面单引号、再开新的一段
-function quotePosix(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`
 }
 
 export function createPty(
@@ -82,6 +77,16 @@ export function createPty(
 
   const shellInfo = resolveShell()
   const profilePath = shellInfo.profileKey ? opts.profiles?.[shellInfo.profileKey] : undefined
+  // 类 Unix 用启动文件接入 shell-integration，不往终端里敲命令，屏上不留回显
+  let args = shellInfo.args
+  if (profilePath && shellInfo.profileKey === 'bash') {
+    // --init-file 只对非登录 shell 生效：去掉 -l，由脚本按登录 shell 的顺序补读启动文件
+    args = ['--init-file', profilePath, '-i']
+    env.__CCT_BASH_LOGIN = '1'
+  } else if (profilePath && shellInfo.profileKey === 'zsh') {
+    if (env.ZDOTDIR) env.__CCT_USER_ZDOTDIR = env.ZDOTDIR
+    env.ZDOTDIR = profilePath
+  }
 
   const spawnOpts: pty.IWindowsPtyForkOptions & pty.IPtyForkOptions = {
     name: 'xterm-256color',
@@ -92,7 +97,7 @@ export function createPty(
   }
   if (IS_WIN) (spawnOpts as pty.IWindowsPtyForkOptions).useConpty = true
 
-  const proc = pty.spawn(shellInfo.file, shellInfo.args, spawnOpts)
+  const proc = pty.spawn(shellInfo.file, args, spawnOpts)
 
   if (IS_WIN) {
     // chcp 65001 + Input/OutputEncoding 一起置 UTF-8（只设 Output 时中文粘贴按 GBK 解码会乱码）；
@@ -101,9 +106,6 @@ export function createPty(
     proc.write(
       `chcp 65001 > $null; [Console]::OutputEncoding = [Console]::InputEncoding = [System.Text.Encoding]::UTF8${profileSuffix}\r`
     )
-  } else if (profilePath) {
-    // 类 Unix 无需 chcp，只 source shell-integration（脚本内防重复注入）
-    proc.write(`. ${quotePosix(profilePath)}\n`)
   }
 
   proc.onData((d) => onData(id, d))

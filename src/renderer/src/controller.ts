@@ -2,7 +2,7 @@
 // 这里只保留一份只读镜像：写操作一律发 storeOp，主进程推回快照后 applySnapshot 同步到运行中的标签。
 // 进程态（PTY、状态点、cc 是否活跃）只在渲染层；改动后调 refreshUI() 触发订阅 rev 的组件重渲染。
 import { TerminalTab, type SessionRecord } from './terminal-tab'
-import { DEFAULT_SETTINGS, type Settings } from './themes'
+import { DEFAULT_SETTINGS, loadBundledFonts, type Settings } from './themes'
 import { fuzzySearch, sessionTitle, type Range } from './lib/format'
 import {
   confirmDialog,
@@ -15,7 +15,8 @@ import {
   toggleQuickOpen,
   showCtxMenu,
   toast,
-  type CtxItem
+  type CtxItem,
+  type NewTabKind
 } from './state/overlays'
 import { icon } from './svg-icons'
 import { setLanguage, t } from './i18n'
@@ -49,9 +50,9 @@ export interface Group {
   tabs: TerminalTab[]
 }
 
-// 标签是否"承载 cc"：勾了自动启动，或实际起过会话——cct 手动起的 autoLaunchCC=false 但有真实会话，也算。
+// 是否智能体标签页：由应用启动过智能体；终端里手动敲命令起的不算
 export function isCcTab(t: TerminalTab): boolean {
-  return t.autoLaunchCC || t.sessions.length > 0
+  return t.autoLaunchCC
 }
 
 // 运行中的分组（未被手动关闭，可以没有标签页）；顺序与 store.groups 一致
@@ -161,7 +162,7 @@ function quoteShell(s: string, shell?: ForegroundProgram): string {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// 判断命令行是否「启动智能体」（claude / cct / codex / claudePath basename）：命中则跳过 shell-busy，交给 hooks 驱动状态。
+// 判断命令行是否「启动智能体」（claude / codex / claudePath basename）：命中则跳过 shell-busy，交给 hooks 驱动状态。
 function commandLineIsCcInvocation(cmd: string | undefined, claudePath: string): boolean {
   if (!cmd) return false
   const m = /^\s*(?:(?:Clear-Host|cls|clear)\s*[;&]\s*)?(?:&\s+)?(?:'([^']*)'|"([^"]*)"|(\S+))/i.exec(cmd)
@@ -170,7 +171,6 @@ function commandLineIsCcInvocation(cmd: string | undefined, claudePath: string):
   if (!exe) return false
   const base = exe.split(/[\\/]/).pop()!.replace(/\.(exe|cmd|ps1|bat)$/i, '')
   if (base === 'claude') return true
-  if (base === 'cct') return true
   if (base === 'codex') return true
   if (claudePath) {
     const cpBase = claudePath.toLowerCase().split(/[\\/]/).pop()?.replace(/\.(exe|cmd|ps1|bat)$/i, '') || ''
@@ -325,10 +325,6 @@ function ccGateRelease(tabId: string): void {
   if (next) next()
 }
 
-// 「重新加载标签」重建 PTY 后要恢复手动起的 cc（autoLaunchCC=false 但 reload 前 cc 正活跃）：
-// 这些 tabId 的下一次 onPtyStarted 破例走一次 launchCC，用完即消费。
-const resumeCcOnNextStart = new Set<string>()
-
 // ─── 启动画面 ───────────────────────────────────────────────────
 // 前台程序变成该智能体之后，输出停顿 LAUNCH_QUIET_MS 视为界面画完；
 // 启动命令执行完、智能体退回提示符、Ctrl+C、超时都直接撤掉
@@ -346,14 +342,14 @@ const launchWatch = new Map<string, LaunchWatch>()
 const launchAborted = new Set<string>()
 const LAUNCH_QUIET_MS = 300
 const LAUNCH_TIMEOUT_MS = 20000
-// 启动恢复的 Claude 标签：首次起 PTY 时停在启动画面，点「恢复会话」才拉起智能体
+// 启动恢复的智能体标签页：首次起 PTY 时停在启动画面，点「恢复会话」才拉起智能体
 const awaitingResume = new Set<string>()
 
 // 要启动的智能体，以及是否打算续上主会话（对话记录是否还在由 launchCC 再判断）
 function launchPlan(tab: TerminalTab, pick?: AgentKind): { agent: AgentKind; resume: boolean } {
   const top = tab.activeSessionId
   const topAgent = top ? (tab.sessions.find((x) => x.sessionId === top)?.agent ?? 'claude') : undefined
-  const agent = pick ?? topAgent ?? 'claude'
+  const agent = pick ?? topAgent ?? tabRec(tab.id)?.agent ?? 'claude'
   return { agent, resume: !!top && topAgent === agent && UUID_RE.test(top) }
 }
 
@@ -427,7 +423,7 @@ function armLaunchQuiet(w: LaunchWatch): void {
 function beginLaunchScreenIfAuto(tab: TerminalTab): void {
   awaitingResume.delete(tab.id)
   launchAborted.delete(tab.id)
-  if (!tab.autoLaunchCC && !resumeCcOnNextStart.has(tab.id)) return
+  if (!tab.autoLaunchCC) return
   const plan = launchPlan(tab)
   beginLaunchScreen(tab, plan.agent, plan.resume)
 }
@@ -445,8 +441,7 @@ async function launchCC(tab: TerminalTab, shell?: ForegroundProgram, pick?: Agen
     if (pick == null) return
     awaitingResume.delete(tab.id)
   }
-  const forced = resumeCcOnNextStart.delete(tab.id)
-  if ((!tab.autoLaunchCC && !forced) || tab.ptyId == null || launchAborted.delete(tab.id)) {
+  if (!tab.autoLaunchCC || tab.ptyId == null || launchAborted.delete(tab.id)) {
     endLaunchScreen(tab.id)
     return
   }
@@ -528,7 +523,7 @@ async function codexCommand(tab: TerminalTab, resumeId: string | null): Promise<
   return `codex${sub} -p cc-terminal --dangerously-bypass-hook-trust${dangerArg}`
 }
 
-// 右键「启动智能体」：标签页转为 Claude 标签页，在当前 shell 里起选中的智能体（主会话属于它就续上）
+// 右键「启动智能体」：标签页转为智能体标签页，在当前 shell 里起选中的智能体（主会话属于它就续上）
 export async function launchAgentInTab(tabId: string, agent: AgentKind): Promise<void> {
   const ctx = findTab(tabId)
   if (!ctx || ctx.tab.ptyId == null) return
@@ -537,7 +532,7 @@ export async function launchAgentInTab(tabId: string, agent: AgentKind): Promise
   if (!fg.atPrompt) return
   if (!tab.autoLaunchCC) {
     tab.autoLaunchCC = true
-    await op({ op: 'setAutoLaunch', id: tabId, autoLaunchCC: true })
+    await op({ op: 'setAutoLaunch', id: tabId, autoLaunchCC: true, agent })
   }
   await launchCC(tab, fg.program, agent)
   tab.term.focus()
@@ -664,9 +659,10 @@ function liveGroup(groupId: string): Group | null {
 }
 
 // 新建标签页：先写 store，再按记录建运行中的标签
-async function createTab(groupId: string, name: string, autoLaunchCC: boolean, stack?: string[]): Promise<TerminalTab | null> {
+async function createTab(groupId: string, name: string, kind: NewTabKind): Promise<TerminalTab | null> {
   const id = uid('t_')
-  await op({ op: 'createTab', id, groupId, name, autoLaunchCC, stack })
+  const agent = kind === 'terminal' ? undefined : kind
+  await op({ op: 'createTab', id, groupId, name, autoLaunchCC: !!agent, agent })
   const g = liveGroup(groupId)
   const rec = tabRec(id)
   if (!g || !rec) return null
@@ -726,8 +722,7 @@ export async function newGroup(): Promise<void> {
     sub: '',
     name: t('新分组'),
     cwd: prefilledCwd,
-    showCC: true,
-    ccChecked: settings.defaults.autoLaunchCC,
+    showKind: true,
     showTabName: true,
     tabName: 'A',
     okLabel: t('创建'),
@@ -736,7 +731,7 @@ export async function newGroup(): Promise<void> {
     onOk: async (v) => {
       const cwd = v.cwd?.trim() || ''
       const gid = await createGroup(v.name, cwd)
-      const tab = await createTab(gid, v.tabName?.trim() || 'A', v.autoLaunchCC === true)
+      const tab = await createTab(gid, v.tabName?.trim() || 'A', v.kind ?? 'terminal')
       await openNewTab(tab)
       rememberCwd(cwd)
     }
@@ -763,7 +758,7 @@ async function openHereWithPath(rawPath: string): Promise<void> {
   const live = groups.find((x) => x.cwd === p)
   const gid = live ? live.id : await createGroup(basenameOfPath(p) || p, p)
   const count = live ? live.tabs.length : 0
-  const tab = await createTab(gid, String.fromCharCode(65 + count), settings.defaults.autoLaunchCC)
+  const tab = await createTab(gid, String.fromCharCode(65 + count), 'terminal')
   await openNewTab(tab)
   rememberCwd(p)
 }
@@ -778,11 +773,10 @@ export async function promptNewTabInGroup(groupId: string): Promise<void> {
     sub: '',
     name: nm,
     cwd: undefined,
-    showCC: true,
-    ccChecked: settings.defaults.autoLaunchCC,
+    showKind: true,
     okLabel: t('创建'),
     onOk: async (v) => {
-      await openNewTab(await createTab(groupId, v.name, v.autoLaunchCC === true))
+      await openNewTab(await createTab(groupId, v.name, v.kind ?? 'terminal'))
     }
   })
 }
@@ -984,8 +978,6 @@ async function doReloadTab(tabId: string): Promise<void> {
   if (!ctx || reloadingTabs.has(tabId)) return
   const { tab } = ctx
   lazyTabs.delete(tabId)
-  // reload 前 cc 活跃（含手敲 cct 起的）→ 新 PTY 里按主会话续上
-  if (tab.autoLaunchCC || tab.ccActive) resumeCcOnNextStart.add(tab.id)
   reloadingTabs.add(tabId)
   beginLaunchScreenIfAuto(tab)
   // 进程态全部归零：旧 PTY 的 busy/报错说明和 cc 活跃标记都不该带到新进程
@@ -999,7 +991,6 @@ async function doReloadTab(tabId: string): Promise<void> {
     console.error('[reload] failed', e)
   } finally {
     reloadingTabs.delete(tabId)
-    if (!findTab(tabId)) resumeCcOnNextStart.delete(tabId)
     refreshUI()
   }
 }
@@ -1138,10 +1129,9 @@ export function openSessionCtx(sessionId: string, x: number, y: number): void {
   if (sess.userTitle) {
     items.push({ label: t('清除自定义标题'), icon: icon('rotate-ccw'), act: () => renameSession(sessionId, '') })
   }
-  items.push({ sep: true })
-  if (onlyOne) {
-    items.push({ label: t('删除（至少保留一条）'), icon: icon('trash'), act: () => toast(t('至少保留一条会话')) })
-  } else {
+  // 只剩一条会话时不能删，菜单里不出现
+  if (!onlyOne) {
+    items.push({ sep: true })
     items.push({ label: t('删除会话'), icon: icon('trash'), danger: true, act: () => void deleteSession(sessionId) })
   }
   showCtxMenu(items, x, y)
@@ -1375,13 +1365,20 @@ function groupLabelOf(rec: TabRec): string {
   return store.groups.find((g) => g.id === rec.groupId)?.name ?? ''
 }
 
-function tabItem(rec: TabRec, hl?: Range[]): QuickItem {
+// 智能体标签页属于哪个智能体：跟主会话走，还没有会话时按新建时选的
+function agentOfTab(rec: TabRec): AgentKind {
+  const top = rec.stack[0] ? store.sessions.find((x) => x.id === rec.stack[0]) : undefined
+  return top ? (top.agent ?? 'claude') : (rec.agent ?? 'claude')
+}
+
+function tabItem(rec: TabRec, hl?: Range[], sub?: string): QuickItem {
   return {
     key: 'tab:' + rec.id,
-    kind: 'tab',
+    kind: rec.autoLaunchCC ? 'agent' : 'terminal',
+    icon: rec.autoLaunchCC ? agentOfTab(rec) : 'square-terminal',
     title: rec.name,
     titleHl: hl,
-    sub: groupLabelOf(rec),
+    sub: sub ?? groupLabelOf(rec),
     closedAt: rec.closedAt,
     act: () => {
       if (rec.closedAt) {
@@ -1393,8 +1390,8 @@ function tabItem(rec: TabRec, hl?: Range[]): QuickItem {
   }
 }
 
-/** 未输入关键字时：今天 / 昨天 / 近 7 天关闭的标签页 */
-export function getQuickHistory(): QuickGroup[] {
+/** 未输入关键字时：今天 / 昨天 / 近 7 天关闭的标签页，按「智能体」「终端」开关筛选 */
+export function getQuickHistory(scopes: Settings['searchScopes']): QuickGroup[] {
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
   const yesterday = today - 86_400_000
@@ -1406,6 +1403,7 @@ export function getQuickHistory(): QuickGroup[] {
   ]
   const closed = store.tabs
     .filter((x) => x.closedAt && Date.parse(x.closedAt) >= since)
+    .filter((x) => (x.autoLaunchCC ? scopes.agent : scopes.terminal))
     .sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? ''))
   for (const rec of closed) {
     const ts = Date.parse(rec.closedAt!)
@@ -1434,6 +1432,18 @@ async function openSessionFromSearch(sessionId: string, rec: TabRec): Promise<vo
   await openNewTab(mountTab(g, fresh))
 }
 
+// 从搜索结果打开分组：有打开的标签页就切过去并在侧栏定位，没有就新建一个标签页
+async function openGroupFromSearch(groupId: string): Promise<void> {
+  const g = findGroup(groupId)
+  if (g && g.tabs.length > 0) {
+    if (activeContext()?.group !== g) activateTab(g.tabs[0].id)
+    await locateActiveTab()
+    return
+  }
+  if (!store.groups.some((x) => x.id === groupId)) return
+  await openNewTab(await createTab(groupId, 'A', 'terminal'))
+}
+
 /** 输入关键字后：按搜索类别分组列出结果 */
 export function quickSearch(query: string, scopes: Settings['searchScopes']): QuickGroup[] {
   const q = query.trim()
@@ -1442,43 +1452,85 @@ export function quickSearch(query: string, scopes: Settings['searchScopes']): Qu
   const rank = <T,>(list: { v: T; score: number }[]): T[] =>
     list.sort((a, b) => b.score - a.score).slice(0, QUICK_LIMIT).map((x) => x.v)
 
-  if (scopes.tabTitle) {
+  // 打开的标签页排在历史标签页前面，同一档内按匹配度
+  const rankOpenFirst = (list: { v: QuickItem; score: number }[]): QuickItem[] =>
+    list
+      .sort((a, b) => Number(!!a.v.closedAt) - Number(!!b.v.closedAt) || b.score - a.score)
+      .slice(0, QUICK_LIMIT)
+      .map((x) => x.v)
+
+  if (scopes.group) {
     const hits: { v: QuickItem; score: number }[] = []
-    for (const rec of store.tabs) {
-      const r = fuzzySearch(q, [rec.name])
-      if (r) hits.push({ v: tabItem(rec, r.highlights[0]), score: r.score })
+    for (const g of store.groups) {
+      const r = fuzzySearch(q, [g.name])
+      if (!r) continue
+      hits.push({
+        v: {
+          key: 'group:' + g.id,
+          kind: 'group',
+          icon: 'folder',
+          title: g.name,
+          titleHl: r.highlights[0],
+          sub: g.cwd,
+          act: () => void openGroupFromSearch(g.id)
+        },
+        score: r.score
+      })
     }
-    if (hits.length > 0) out.push({ label: t('标签页'), items: rank(hits) })
+    if (hits.length > 0) out.push({ label: t('分组'), items: rank(hits) })
   }
 
-  if (scopes.sessionTitle) {
+  // 智能体：标签页名字或主会话标题命中列标签页本身；栈里其余会话各列一行，同一会话只列一次
+  if (scopes.agent) {
     const hits: { v: QuickItem; score: number }[] = []
     const seen = new Set<string>()
-    // 打开的标签页优先认领会话，同一会话只列一次
-    const ordered = [...store.tabs].sort((a, b) => Number(!!a.closedAt) - Number(!!b.closedAt))
+    const ordered = store.tabs
+      .filter((x) => x.autoLaunchCC)
+      .sort((a, b) => Number(!!a.closedAt) - Number(!!b.closedAt))
     for (const rec of ordered) {
+      // sessionsOfStack 按从旧到新排，主会话是 stack[0]
       const sessions = sessionsOfStack(rec.stack)
-      for (const sess of sessions) {
+      const top = sessions.find((x) => x.sessionId === rec.stack[0])
+      const rest = sessions.filter((x) => x !== top)
+      const topTitle = top ? sessionTitle(top, sessions, rec.name) : ''
+      if (top) seen.add(top.sessionId)
+      const r = fuzzySearch(q, [rec.name, topTitle])
+      if (r) {
+        const sub = topTitle && topTitle !== rec.name ? `${groupLabelOf(rec)} · ${topTitle}` : groupLabelOf(rec)
+        hits.push({ v: tabItem(rec, r.highlights[0], sub), score: r.score })
+      }
+      for (const sess of rest) {
         if (seen.has(sess.sessionId)) continue
         seen.add(sess.sessionId)
         const title = sessionTitle(sess, sessions, rec.name)
-        const r = fuzzySearch(q, [title])
-        if (!r) continue
+        const rs = fuzzySearch(q, [title])
+        if (!rs) continue
         hits.push({
           v: {
             key: 'sess:' + sess.sessionId,
             kind: 'session',
+            icon: sess.agent ?? 'claude',
             title,
-            titleHl: r.highlights[0],
+            titleHl: rs.highlights[0],
             sub: `${groupLabelOf(rec)} · ${rec.name}`,
             closedAt: rec.closedAt,
             act: () => void openSessionFromSearch(sess.sessionId, rec)
           },
-          score: r.score
+          score: rs.score
         })
       }
     }
-    if (hits.length > 0) out.push({ label: t('会话'), items: rank(hits) })
+    if (hits.length > 0) out.push({ label: t('智能体'), items: rankOpenFirst(hits) })
+  }
+
+  if (scopes.terminal) {
+    const hits: { v: QuickItem; score: number }[] = []
+    for (const rec of store.tabs) {
+      if (rec.autoLaunchCC) continue
+      const r = fuzzySearch(q, [rec.name])
+      if (r) hits.push({ v: tabItem(rec, r.highlights[0]), score: r.score })
+    }
+    if (hits.length > 0) out.push({ label: t('终端'), items: rankOpenFirst(hits) })
   }
 
   if (scopes.path) {
@@ -1495,6 +1547,7 @@ export function quickSearch(query: string, scopes: Settings['searchScopes']): Qu
         v: {
           key: 'path:' + g.cwd,
           kind: 'path',
+          icon: 'map-pin',
           title: g.cwd,
           titleHl: r.highlights[0],
           sub: g.name,
@@ -1503,7 +1556,7 @@ export function quickSearch(query: string, scopes: Settings['searchScopes']): Qu
         score: r.score
       })
     }
-    if (hits.length > 0) out.push({ label: t('目录'), items: rank(hits) })
+    if (hits.length > 0) out.push({ label: t('路径'), items: rank(hits) })
   }
   return out
 }
@@ -1537,6 +1590,7 @@ export async function preBoot(): Promise<void> {
   setLanguage(settings.language)
   // macOS 红绿灯 / 自绘窗口按钮的显隐由 body.platform-* 的 CSS 适配
   document.body.classList.add(window.term.platform === 'darwin' ? 'platform-mac' : 'platform-win')
+  await loadBundledFonts()
 }
 
 // 启动恢复：按 store 重建上次打开的分组与标签页，并起 PTY（cc 标签按主会话 --resume）
