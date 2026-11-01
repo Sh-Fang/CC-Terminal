@@ -1080,21 +1080,11 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 .field-check {
   margin: -2px 0 4px;
 }
-/* 新建标签页的类型：终端 / Claude Code / Codex 三选一，图标按钮 */
-.kind-pick { display: flex; gap: 8px; }
-.kind-opt {
-  width: 44px; height: 36px;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  background: var(--canvas);
-  color: var(--mute);
-  cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
-}
-.kind-opt:hover { color: var(--ink); border-color: var(--hairline-strong); }
-.kind-opt.on { color: var(--ink); border-color: var(--ink); background: var(--canvas-soft-2); }
-.kind-opt:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* 新建标签页的类型：终端 / Claude Code / Codex 三选一，沿用设置里的分段控件，撑满一行与输入框同高 */
+.kind-pick { display: flex; width: 100%; height: 40px; }
+.kind-pick .seg-item { flex: 1; justify-content: center; }
+.kind-pick .seg-item span { display: inline-flex; }
+.kind-pick .seg-item:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 /* 不用 <label> 包裹：点说明文字不应触发开关（标题/说明是纯文字，可选中） */
 .field-check .fc-line {
   display: flex;

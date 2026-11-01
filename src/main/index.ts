@@ -15,6 +15,7 @@ import { setLanguage, t } from './i18n'
 import { setMainWindowGetter } from './windows'
 import { refreshMetaInBackground } from './store'
 import { mergeLoginShellPath } from './sys-env'
+import { relaunchApp } from './relaunch'
 
 // 先补全 PATH 再做别的：之后起的 npm、node 等子进程都继承它
 mergeLoginShellPath()
@@ -355,7 +356,7 @@ app.whenReady().then(() => {
   // 先同步 killAll 收干净 conpty（避免 exit() 析构与 conpty 线程竞态），再 app.exit。
   ipcMain.on('app:relaunch', () => {
     allowClose = true
-    app.relaunch()
+    relaunchApp()
     try { stopWatchers() } catch {}
     try { destroyTray() } catch {}
     try { destroyFloater() } catch {}

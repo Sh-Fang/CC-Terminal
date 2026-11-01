@@ -154,8 +154,8 @@ function basenameOfPath(p: string): string {
   return segs[segs.length - 1] ?? ''
 }
 
-const KIND_OPTIONS: { kind: NewTabKind; icon: 'terminal' | 'claude' | 'codex'; label: string }[] = [
-  { kind: 'terminal', icon: 'terminal', label: '终端' },
+const KIND_OPTIONS: { kind: NewTabKind; icon: 'square-terminal' | 'claude' | 'codex'; label: string }[] = [
+  { kind: 'terminal', icon: 'square-terminal', label: '终端' },
   { kind: 'claude', icon: 'claude', label: 'Claude Code' },
   { kind: 'codex', icon: 'codex', label: 'Codex' }
 ]
@@ -312,20 +312,20 @@ function ModalBody({ cfg }: { cfg: ModalOpts }) {
       {cfg.showKind && (
         <div className="field" id="modal-kind-field">
           <label>{t('类型')}</label>
-          <div className="kind-pick" role="radiogroup" aria-label={t('类型')}>
+          <div className="seg-group kind-pick" role="radiogroup" aria-label={t('类型')}>
             {KIND_OPTIONS.map((k) => (
               <button
                 key={k.kind}
                 type="button"
                 role="radio"
                 aria-checked={kind === k.kind}
-                aria-label={t(k.label)}
-                title={t(k.label)}
-                className={'kind-opt' + (kind === k.kind ? ' on' : '')}
+                className={'seg-item' + (kind === k.kind ? ' active' : '')}
                 data-testid={`modal-kind-${k.kind}`}
                 onClick={() => setKind(k.kind)}
-                dangerouslySetInnerHTML={{ __html: icon(k.icon, { size: 18 }) }}
-              />
+              >
+                <span dangerouslySetInnerHTML={{ __html: icon(k.icon, { size: 14 }) }} />
+                {t(k.label)}
+              </button>
             ))}
           </div>
         </div>

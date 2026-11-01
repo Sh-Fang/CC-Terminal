@@ -3,6 +3,7 @@
 // 仓库私有/尚无 Release 时 API 是 404，归类为 notfound 由 UI 提示「暂无可用的发布版本」。
 import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { relaunchApp } from './relaunch'
 import type { UpdateActionResult, UpdateCheckResult, UpdateEvent } from '../shared/update'
 
 let emit: ((event: UpdateEvent) => void) | null = null
@@ -36,13 +37,17 @@ function handleUpdaterError(error: unknown): void {
   })
 }
 
+// deb/rpm 装完后 electron-updater 用 app.relaunch 拉起，Linux 上会带 no_new_privs（见 relaunch.ts），改由自己拉起；
+// AppImage 的更新器本就用 Node spawn，不受影响
+const SELF_RELAUNCH = process.platform === 'linux' && !process.env.APPIMAGE
+
 let wired = false
 function wire(): void {
   if (wired) return
   wired = true
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
-  autoUpdater.autoRunAppAfterInstall = true
+  autoUpdater.autoRunAppAfterInstall = !SELF_RELAUNCH
   autoUpdater.on('download-progress', (progress) => {
     if (phase !== 'downloading') return
     const percent = Math.min(100, Math.max(0, Number.isFinite(progress.percent) ? progress.percent : 0))
@@ -143,9 +148,9 @@ export function quitAndInstallUpdate(beforeInstall?: () => void): UpdateActionRe
     beforeInstall?.()
     autoUpdater.quitAndInstall(false, true)
     // electron-updater 无法启动安装器时会同步触发 error 事件，并把阶段退回 downloaded。
-    return lastInstallError
-      ? { ok: false, error: 'failed', message: lastInstallError }
-      : { ok: true }
+    if (lastInstallError) return { ok: false, error: 'failed', message: lastInstallError }
+    if (SELF_RELAUNCH) relaunchApp()
+    return { ok: true }
   } catch (error) {
     handleUpdaterError(error)
     return { ok: false, error: 'failed', message: errorMessage(error) }
