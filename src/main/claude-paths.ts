@@ -5,8 +5,9 @@ import { join } from 'node:path'
 // session id 即标准 UUID；cc 的 jsonl 文件名就是 <sessionId>.jsonl
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// cc 把每个项目的会话 transcript 落在 ~/.claude/projects/<编码后的cwd>/<sessionId>.jsonl
-export const projectsRoot = (): string => join(homedir(), '.claude', 'projects')
+// cc 把每个项目的会话 transcript 落在 <配置目录>/projects/<编码后的cwd>/<sessionId>.jsonl；
+// 配置目录默认 ~/.claude，设了 CLAUDE_CONFIG_DIR 时跟随它
+export const projectsRoot = (): string => join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects')
 
 // sessionId → jsonl 绝对路径缓存：每次全量扫 projects 目录是几百次同步 fs 调用，恢复
 // 多标签时（每个会话都要查时间戳/存在性）会堵主进程。只缓存命中——miss 不缓存，因为

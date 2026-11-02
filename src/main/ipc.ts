@@ -33,6 +33,19 @@ import type { UpdateActionResult } from '../shared/update'
 import { t } from './i18n'
 import { moveFloaterTo, pushCountsToFloater, setFloaterDragging, setFloaterEnabled, setFloaterFocusable } from './floater'
 import { sendToMain } from './windows'
+import {
+  pushScreen,
+  regenPair,
+  remoteBrief,
+  remoteInfo,
+  remotePtyData,
+  remoteSettingsChanged,
+  revokeDevice,
+  setRemoteEnabled,
+  setRemotePort,
+  setRemoteTabs
+} from './remote/server'
+import type { RemoteGroup } from '../shared/remote'
 
 function shouldDisableAutoupdate(): boolean {
   try { return loadSettings().disableAutoupdater } catch { return true }
@@ -111,7 +124,11 @@ export function registerPtyIpc(
   ipcMain.handle('store:op', (_e, o: StoreOp) => applyOp(o))
 
   ipcMain.handle('settings:load', () => loadSettings())
-  ipcMain.handle('settings:save', (_e, s: unknown) => saveSettings(s))
+  ipcMain.handle('settings:save', (_e, s: unknown) => {
+    const saved = saveSettings(s)
+    remoteSettingsChanged()
+    return saved
+  })
 
   ipcMain.handle('clipboard:read', () => readClipboardSelection())
   ipcMain.handle('clipboard:write', (_e, text: unknown) =>
@@ -282,6 +299,7 @@ export function registerPtyIpc(
         (sid, data) => {
           sendToMain('pty:data', { id: sid, data })
           pokeForeground()
+          remotePtyData(sid)
         },
         (sid, exitCode) => sendToMain('pty:exit', { id: sid, exitCode })
       )
@@ -292,6 +310,28 @@ export function registerPtyIpc(
   startForegroundWatch(shellPids, (id, info) => sendToMain('pty:foreground', { id, ...info }))
   ipcMain.handle('pty:foreground', () => currentForeground())
   ipcMain.handle('usage:sample', () => sampleUsage(shellPids()))
+
+  // 远程访问
+  ipcMain.handle('remote:info', (_e, base: unknown) => remoteInfo(typeof base === 'string' ? base : undefined))
+  ipcMain.handle('remote:brief', () => remoteBrief())
+  ipcMain.handle('remote:setEnabled', (_e, on: unknown) => setRemoteEnabled(on === true))
+  ipcMain.handle('remote:setPort', (_e, port: unknown) => setRemotePort(port))
+  ipcMain.handle('remote:regen', () => regenPair())
+  ipcMain.handle('remote:revoke', (_e, id: unknown) => {
+    if (typeof id === 'string') {
+      revokeDevice(id)
+    }
+  })
+  ipcMain.on('remote:tabs', (_e, groups: unknown) => {
+    if (Array.isArray(groups)) {
+      setRemoteTabs(groups as RemoteGroup[])
+    }
+  })
+  ipcMain.on('remote:screen', (_e, p: { tabId?: unknown; lines?: unknown }) => {
+    if (typeof p?.tabId === 'string' && Array.isArray(p.lines)) {
+      pushScreen(p.tabId, p.lines.filter((l): l is string => typeof l === 'string'))
+    }
+  })
 
   ipcMain.handle('hooks:paths', () => getHookPaths())
 

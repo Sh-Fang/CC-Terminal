@@ -24,6 +24,7 @@ import { bump } from './state/store'
 import type { GroupView, HistoryEntry, QuickGroup, QuickItem } from './app-types'
 import type { AgentKind, StoreOp, StoreSnapshot, TabRec } from '../../shared/store-types'
 import type { ForegroundInfo, ForegroundProgram } from '../../shared/foreground'
+import type { RemoteBrief, RemoteGroup, RemotePreview } from '../../shared/remote'
 
 export type { GroupView, HistoryEntry, QuickGroup, QuickItem } from './app-types'
 
@@ -105,10 +106,106 @@ function pushFloaterCounts(): void {
   window.term.floaterPush({ done, attention, busy, total })
 }
 
-// 统一刷新入口：bump 触发订阅 rev 的组件重渲染，悬浮窗计数一并跟着刷。
+// 远程访问开着时，把标签页列表（含状态、pty、当前会话）推给主进程转发给手机；合并 150ms 内的多次刷新
+let remoteEnabled = false
+let remoteTimer: number | null = null
+// 有手机在线时定期重推列表，普通终端的摘要（屏幕最后一行）跟着刷新
+const REMOTE_POLL_MS = 3000
+let remotePoll: number | null = null
+
+function remoteAgentOf(tab: TerminalTab): AgentKind | null {
+  if (!isCcTab(tab)) {
+    return null
+  }
+  const sess = tab.sessions.find((x) => x.sessionId === tab.activeSessionId)
+  return sess?.agent ?? tabRec(tab.id)?.agent ?? 'claude'
+}
+
+/** 普通终端的摘要：屏幕上最后一行非空文字 */
+function remoteTermPreview(tab: TerminalTab): RemotePreview | null {
+  const lines = tab.tailLines(60)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const text = lines[i].trim()
+    if (text) {
+      return { role: 'term', text: text.slice(0, 120) }
+    }
+  }
+  return null
+}
+
+function pushRemoteTabs(): void {
+  if (!remoteEnabled || remoteTimer != null) {
+    return
+  }
+  remoteTimer = window.setTimeout(() => {
+    remoteTimer = null
+    const out: RemoteGroup[] = groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      tabs: g.tabs
+        .flatMap((x) => [x, ...(children.get(x.id) ?? [])])
+        .map((x) => ({
+          id: x.id,
+          name: x.name,
+          status: x.status ?? 'idle',
+          note: x.note,
+          fg: foregroundOf(x).program,
+          agent: remoteAgentOf(x),
+          sessionId: x.activeSessionId ?? null,
+          ptyId: x.ptyId,
+          child: isChildId(x.id),
+          preview: remoteAgentOf(x) ? null : remoteTermPreview(x)
+        }))
+    }))
+    window.term.remotePushTabs(out)
+  }, 150)
+}
+
+// 手机上点「恢复会话」：在电脑上切到这个标签页，等 PTY 起来后照启动画面的按钮拉起智能体；
+// 智能体退回了 shell 提示符的，直接重新拉起
+async function remoteResume(tabId: string): Promise<void> {
+  const hit = findTab(tabId)
+  if (!hit || !isCcTab(hit.tab)) {
+    return
+  }
+  const tab = hit.tab
+  activateTab(tabId)
+  for (let i = 0; i < 50 && tab.ptyId == null; i++) {
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  if (tab.ptyId == null) {
+    return
+  }
+  if (awaitingResume.has(tab.id)) {
+    confirmResume(tab)
+    return
+  }
+  const fg = foregroundOf(tab)
+  if (fg.program !== 'claude' && fg.program !== 'codex' && fg.atPrompt) {
+    void launchCC(tab)
+  }
+}
+
+function setRemoteEnabled(b: RemoteBrief): void {
+  remoteEnabled = b.enabled
+  if (remoteEnabled) {
+    pushRemoteTabs()
+  }
+  const want = remoteEnabled && b.online > 0
+  if (want && remotePoll == null) {
+    remotePoll = window.setInterval(pushRemoteTabs, REMOTE_POLL_MS)
+  } else if (!want && remotePoll != null) {
+    window.clearInterval(remotePoll)
+    remotePoll = null
+  } else {
+  }
+}
+
+// 统一刷新入口：bump 触发订阅 rev 的组件重渲染，悬浮窗计数、远程访问一并跟着刷。
 function refreshUI(): void {
   bump()
   pushFloaterCounts()
+  pushRemoteTabs()
 }
 
 function applySettingsToAll(): void {
@@ -1654,6 +1751,22 @@ export async function initApp(): Promise<void> {
   const offExit = window.term.onExit((id, exitCode) => {
     fgByPty.delete(id)
     for (const t of allTabs()) if (t.ptyId === id) return t.handlePtyExit(exitCode)
+  })
+  // 远程访问：开关状态决定是否推标签页；手机要屏幕快照时取缓冲区末尾的文字
+  window.term.onRemoteBrief(setRemoteEnabled)
+  void window.term.remoteBrief().then(setRemoteEnabled)
+  window.term.onRemoteResume((tabId) => void remoteResume(tabId))
+  // 手机打开了启动后还没点开过的标签页：在电脑上切过去，终端照常拉起
+  window.term.onRemoteWake((tabId) => {
+    if (lazyTabs.has(tabId)) {
+      activateTab(tabId)
+    }
+  })
+  window.term.onRemoteScreenReq((tabId) => {
+    const hit = findTab(tabId)
+    if (hit) {
+      window.term.remotePushScreen(tabId, hit.tab.tailLines(200))
+    }
   })
   const offForeground = window.term.onForeground((id, info) => {
     const prev = fgByPty.get(id)

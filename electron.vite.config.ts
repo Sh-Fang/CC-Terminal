@@ -42,7 +42,8 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
-          floater: resolve(__dirname, 'src/renderer/floater.html')
+          floater: resolve(__dirname, 'src/renderer/floater.html'),
+          remote: resolve(__dirname, 'src/renderer/remote.html')
         }
       }
     }

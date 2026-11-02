@@ -28,6 +28,7 @@ import { getSettings, updateSettings } from "../controller";
 import { useAppStore } from "../state/store";
 import { AgentVersions } from "./AgentVersions";
 import { BrandLogo } from "./BrandLogo";
+import { RemoteSettings } from "./RemoteSettings";
 import { escapeHtml } from "../lib/format";
 import type { AgentKind } from "../../../shared/store-types";
 
@@ -417,7 +418,7 @@ export function SettingsPanel() {
     setAgentAvail({ claude, codex });
   }
 
-  // 打开时：绑定表单 + 回到外观分区 + 环境变量一致性补写 + 重新检测智能体
+  // 打开时：绑定表单 + 回到外观分区（或指定的分区） + 环境变量一致性补写 + 重新检测智能体
   const prevOpenRef = useRef(false);
   useEffect(() => {
     if (open && !prevOpenRef.current) {
@@ -426,7 +427,7 @@ export function SettingsPanel() {
       formRef.current = f;
       setForm(f);
       lastDisableUpdRef.current = s.disableAutoupdater;
-      setSection("appearance");
+      activateSection(useOverlays.getState().settingsSection ?? "appearance");
       setAgentTab("claude");
       void ensureUpdConsistency();
       void refreshAgentAvail();
@@ -731,6 +732,22 @@ export function SettingsPanel() {
                 dangerouslySetInnerHTML={{ __html: icon("bot", { size: 14 }) }}
               />
               {t("智能体")}
+            </button>
+            <button
+              className={
+                "set-nav-item" + (section === "remote" ? " active" : "")
+              }
+              data-section="remote"
+              data-testid="set-nav-remote"
+              type="button"
+              onClick={() => activateSection("remote")}
+            >
+              <span
+                className="ic"
+                data-testid="set-nav-remote-ic"
+                dangerouslySetInnerHTML={{ __html: icon("smartphone", { size: 14 }) }}
+              />
+              {t("远程访问")}
             </button>
             <button
               className={
@@ -1202,6 +1219,15 @@ export function SettingsPanel() {
                   </AgentVersions>
                 </div>
               ))}
+            </div>
+
+            <div
+              className="set-section"
+              data-section="remote"
+              data-testid="set-section-remote"
+              hidden={section !== "remote"}
+            >
+              <RemoteSettings active={open && section === "remote"} />
             </div>
 
             <div

@@ -586,6 +586,19 @@ export class TerminalTab {
     return false
   }
 
+  // 缓冲区末尾 max 行的文字（含当前屏幕），去掉末尾空行；远程访问的屏幕快照用
+  tailLines(max: number): string[] {
+    const buf = this.term.buffer.active
+    const out: string[] = []
+    for (let y = Math.max(0, buf.length - max); y < buf.length; y++) {
+      out.push(buf.getLine(y)?.translateToString(true) ?? '')
+    }
+    while (out.length > 0 && !out[out.length - 1].trim()) {
+      out.pop()
+    }
+    return out
+  }
+
   // ── PTY 生命周期 ──
 
   async startPty(freshEnv = false): Promise<void> {

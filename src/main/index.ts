@@ -16,6 +16,7 @@ import { setMainWindowGetter } from './windows'
 import { refreshMetaInBackground } from './store'
 import { mergeLoginShellPath } from './sys-env'
 import { relaunchApp } from './relaunch'
+import { applyRemote } from './remote/server'
 
 // 先补全 PATH 再做别的：之后起的 npm、node 等子进程都继承它
 mergeLoginShellPath()
@@ -375,6 +376,7 @@ app.whenReady().then(() => {
   sessionWatcher.start()
   stateWatcher.start()
   createWindow()
+  applyRemote()
   // 启动稳定后再在后台补会话标题来源，不和首屏恢复抢 IO
   setTimeout(() => refreshMetaInBackground(), 5000)
   ensureTray()

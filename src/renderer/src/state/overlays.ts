@@ -91,6 +91,8 @@ interface OverlaysState {
   memoEditSeq: number
   memoTip: MemoTipState | null
   settingsOpen: boolean
+  // 打开设置时要跳到的分区；空则回到外观
+  settingsSection: string | null
   quickOpen: boolean
   searchOpen: boolean
 }
@@ -107,6 +109,7 @@ export const useOverlays = create<OverlaysState>(() => ({
   memoEditSeq: 0,
   memoTip: null,
   settingsOpen: false,
+  settingsSection: null,
   quickOpen: false,
   searchOpen: false
 }))
@@ -202,8 +205,8 @@ export function hideMemoTip(): void {
   useOverlays.setState({ memoTip: null })
 }
 
-export function openSettings(): void {
-  useOverlays.setState({ settingsOpen: true })
+export function openSettings(section?: string): void {
+  useOverlays.setState({ settingsOpen: true, settingsSection: section ?? null })
 }
 export function closeSettings(): void {
   useOverlays.setState({ settingsOpen: false })

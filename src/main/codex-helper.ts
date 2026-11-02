@@ -11,14 +11,14 @@ export function codexHome(): string {
   return process.env.CODEX_HOME || join(homedir(), '.codex')
 }
 
-// 会话记录落在 sessions/YYYY/MM/DD/rollout-<时间>-<id>.jsonl；从新到旧逐日找
-export function codexSessionExists(sessionId: string): boolean {
+// 会话记录落在 sessions/YYYY/MM/DD/rollout-<时间>-<id>.jsonl；从新到旧逐日找，返回绝对路径
+export function codexSessionPath(sessionId: string): string | null {
   if (!UUID_RE.test(sessionId)) {
-    return false
+    return null
   }
   const root = join(codexHome(), 'sessions')
   if (!existsSync(root)) {
-    return false
+    return null
   }
   const suffix = `-${sessionId.toLowerCase()}.jsonl`
   const desc = (dir: string): string[] => {
@@ -31,11 +31,16 @@ export function codexSessionExists(sessionId: string): boolean {
   for (const y of desc(root)) {
     for (const m of desc(join(root, y))) {
       for (const d of desc(join(root, y, m))) {
-        if (desc(join(root, y, m, d)).some((f) => f.toLowerCase().endsWith(suffix))) {
-          return true
+        const hit = desc(join(root, y, m, d)).find((f) => f.toLowerCase().endsWith(suffix))
+        if (hit) {
+          return join(root, y, m, d, hit)
         }
       }
     }
   }
-  return false
+  return null
+}
+
+export function codexSessionExists(sessionId: string): boolean {
+  return codexSessionPath(sessionId) !== null
 }

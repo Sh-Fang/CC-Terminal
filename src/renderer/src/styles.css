@@ -903,6 +903,63 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 .res-group { color: var(--mute); flex: 0 1 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .res-tabname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* 远程访问：状态栏里资源占用左边的手机图标 + 在线设备数 */
+.remote-badge {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: flex; align-items: center; gap: 4px;
+  margin-left: auto;
+  padding: 0 8px;
+  border: none;
+  border-left: 1px solid var(--hairline);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.remote-badge:hover { color: var(--ink); background: var(--hairline); }
+.remote-badge.on { color: var(--ink); }
+.remote-badge + .res-bar { margin-left: 0; }
+
+/* 设置 → 远程访问 */
+.remote-error {
+  margin-bottom: 12px; padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  color: var(--error); font-size: 12px;
+}
+.remote-pair { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 4px; }
+.remote-qr {
+  flex: 0 0 148px; width: 148px; height: 148px;
+  padding: 6px; border-radius: var(--r-md);
+  background: #fff; border: 1px solid var(--hairline);
+}
+.remote-qr svg { display: block; width: 100%; height: 100%; }
+.remote-addrs { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.remote-addr {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline); border-radius: var(--r-sm);
+  background: transparent; color: var(--body);
+  font: inherit; font-size: 12px; text-align: left;
+  cursor: pointer;
+}
+.remote-addr:hover { background: var(--hairline); }
+.remote-addr.active { border-color: var(--ink); color: var(--ink); }
+.remote-addr-kind { flex: 0 0 auto; font-size: 11px; color: var(--mute); }
+.remote-addr-url { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remote-regen { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; }
+.remote-regen .ic { display: grid; place-items: center; }
+.remote-devices { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
+.remote-empty { color: var(--mute); font-size: 12px; padding: 4px 0; }
+.remote-device { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; color: var(--ink); }
+.remote-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--hairline-strong, #ccc); }
+.remote-dot.on { background: #1a7f37; }
+.remote-device-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remote-device-seen { flex: 0 0 auto; color: var(--mute); font-size: 12px; }
+.remote-revoke { flex: 0 0 auto; padding: 3px 10px; font-size: 12px; }
+.remote-port-row input { width: 120px; }
+
 /* Statusbar */
 .statusbar {
   flex: 0 0 26px;

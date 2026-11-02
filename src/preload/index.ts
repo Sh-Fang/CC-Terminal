@@ -3,6 +3,7 @@ import type { UpdateActionResult, UpdateCheckResult, UpdateEvent } from '../shar
 import type { AgentKind, SessionSource, StoreOp, StoreSnapshot } from '../shared/store-types'
 import type { ForegroundInfo } from '../shared/foreground'
 import type { UsageSample } from '../shared/usage'
+import type { RemoteBrief, RemoteGroup, RemoteInfo } from '../shared/remote'
 
 export type {
   AgentKind,
@@ -173,6 +174,19 @@ export interface TermBridge {
   onForeground(cb: (id: number, info: ForegroundInfo) => void): () => void
   foregroundAll(): Promise<Record<number, ForegroundInfo>>
   usageSample(): Promise<UsageSample>
+  // 远程访问
+  remoteInfo(base?: string): Promise<RemoteInfo>
+  remoteBrief(): Promise<RemoteBrief>
+  remoteSetEnabled(on: boolean): Promise<void>
+  remoteSetPort(port: number): Promise<void>
+  remoteRegen(): Promise<void>
+  remoteRevoke(id: string): Promise<void>
+  remotePushTabs(groups: RemoteGroup[]): void
+  remotePushScreen(tabId: string, lines: string[]): void
+  onRemoteBrief(cb: (b: RemoteBrief) => void): () => void
+  onRemoteScreenReq(cb: (tabId: string) => void): () => void
+  onRemoteResume(cb: (tabId: string) => void): () => void
+  onRemoteWake(cb: (tabId: string) => void): () => void
   onSessionEvent(cb: (e: SessionEvent) => void): () => void
   onStateEvent(cb: (e: StateEvent) => void): () => void
   // 悬浮窗
@@ -280,6 +294,34 @@ const api: TermBridge = {
   },
   foregroundAll: () => ipcRenderer.invoke('pty:foreground'),
   usageSample: () => ipcRenderer.invoke('usage:sample'),
+  remoteInfo: (base) => ipcRenderer.invoke('remote:info', base),
+  remoteBrief: () => ipcRenderer.invoke('remote:brief'),
+  remoteSetEnabled: (on) => ipcRenderer.invoke('remote:setEnabled', on),
+  remoteSetPort: (port) => ipcRenderer.invoke('remote:setPort', port),
+  remoteRegen: () => ipcRenderer.invoke('remote:regen'),
+  remoteRevoke: (id) => ipcRenderer.invoke('remote:revoke', id),
+  remotePushTabs: (groups) => ipcRenderer.send('remote:tabs', groups),
+  remotePushScreen: (tabId, lines) => ipcRenderer.send('remote:screen', { tabId, lines }),
+  onRemoteBrief: (cb) => {
+    const h = (_e: IpcRendererEvent, b: RemoteBrief) => cb(b)
+    ipcRenderer.on('remote:brief', h)
+    return () => ipcRenderer.off('remote:brief', h)
+  },
+  onRemoteScreenReq: (cb) => {
+    const h = (_e: IpcRendererEvent, p: { tabId: string }) => cb(p.tabId)
+    ipcRenderer.on('remote:screen-req', h)
+    return () => ipcRenderer.off('remote:screen-req', h)
+  },
+  onRemoteResume: (cb) => {
+    const h = (_e: IpcRendererEvent, p: { tabId: string }) => cb(p.tabId)
+    ipcRenderer.on('remote:resume', h)
+    return () => ipcRenderer.off('remote:resume', h)
+  },
+  onRemoteWake: (cb) => {
+    const h = (_e: IpcRendererEvent, p: { tabId: string }) => cb(p.tabId)
+    ipcRenderer.on('remote:wake', h)
+    return () => ipcRenderer.off('remote:wake', h)
+  },
   onSessionEvent: (cb) => {
     const h = (_e: IpcRendererEvent, p: SessionEvent) => cb(p)
     ipcRenderer.on('session:event', h)

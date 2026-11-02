@@ -3,6 +3,7 @@ import { toast } from '../state/overlays'
 import { getSessionInfoCtx } from '../controller'
 import { t } from '../i18n'
 import { ResourceBar } from './ResourceBar'
+import { RemoteBadge } from './RemoteBadge'
 
 export function SessionInfoBar() {
   const rev = useAppStore((s) => s.rev)
@@ -32,6 +33,7 @@ export function SessionInfoBar() {
       >
         {cwd}
       </span>
+      <RemoteBadge />
       <ResourceBar />
     </div>
   )
