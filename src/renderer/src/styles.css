@@ -1382,7 +1382,16 @@ mark.hl {
   user-select: text;
   cursor: auto;
 }
-/* 绿点停留 1~10s 这类多档位分段：档位窄一点免得撑爆一行 */
+/* 行标题旁的说明图标：悬停看 tooltip */
+.set-info {
+  display: inline-flex;
+  vertical-align: -1px;
+  margin-left: 4px;
+  color: var(--mute);
+  cursor: help;
+}
+.set-info:hover { color: var(--ink); }
+/* 多档位分段：档位窄一点免得撑爆一行 */
 .seg-group.seg-compact .seg-item { padding: 5px 9px; }
 .set-row input,
 .set-row select {
@@ -1540,307 +1549,6 @@ mark.hl {
 }
 .set-hint.ok { color: #1a7f37; }
 .set-hint.warn { color: var(--warning-deep); }
-
-/* ─── Claude Code 账户 ─────────────────────────────────────────── */
-.cc-account {
-  margin-bottom: 18px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--hairline);
-}
-.cc-account-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.cc-account-title {
-  margin: 0;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 22px;
-}
-
-/* 下拉选择：收起时只显示当前生效账户，展开后选中即切换 */
-.cc-account-select { position: relative; }
-.cc-account-trigger {
-  width: 100%;
-  min-height: 40px;
-  padding: 6px 10px 6px 12px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  background: var(--canvas);
-  color: inherit;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color .12s, background .12s;
-}
-.cc-account-trigger:hover:not(:disabled) { border-color: var(--hairline-strong); }
-.cc-account-trigger.open { border-color: var(--ink); }
-.cc-account-trigger:disabled { opacity: .55; cursor: default; }
-.cc-account-trigger-text {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.cc-account-trigger-name {
-  overflow: hidden;
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cc-account-trigger-meta,
-.cc-account-option-meta {
-  overflow: hidden;
-  color: var(--mute);
-  font-family: var(--mono);
-  font-size: 10px;
-  line-height: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cc-account-trigger-caret {
-  flex: 0 0 auto;
-  display: inline-grid;
-  place-items: center;
-  color: var(--mute);
-  transition: transform .14s;
-}
-.cc-account-trigger.open .cc-account-trigger-caret { transform: rotate(180deg); }
-
-.cc-account-menu {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  background: var(--canvas);
-  box-shadow: var(--sh-5);
-  overflow: hidden;
-}
-/* 固定高度 + 内部滚动，滚动条隐藏 */
-.cc-account-menu-scroll {
-  max-height: 148px;
-  overflow-y: auto;
-  scrollbar-width: none;
-}
-.cc-account-menu-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
-.cc-account-option {
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 8px 0 12px;
-  border-bottom: 1px solid var(--hairline);
-  position: relative;
-  transition: background .1s;
-}
-.cc-account-option:last-child { border-bottom: none; }
-.cc-account-option:hover { background: var(--canvas-soft); }
-.cc-account-option.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--ink);
-}
-.cc-account-option-main {
-  min-width: 0;
-  flex: 1;
-  align-self: stretch;
-  padding: 5px 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.cc-account-option-main:disabled { cursor: default; }
-.cc-account-option-main:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: -2px;
-}
-.cc-account-option-name {
-  max-width: 100%;
-  overflow: hidden;
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cc-account-option.active .cc-account-option-name { font-weight: 600; }
-.cc-account-option-ops {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.cc-account-op-btn {
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--mute);
-  cursor: pointer;
-  transition: color .12s, border-color .12s, background .12s;
-}
-.cc-account-op-btn:hover:not(:disabled) {
-  color: var(--ink);
-  border-color: var(--hairline);
-  background: var(--canvas);
-}
-.cc-account-op-btn.danger:hover:not(:disabled) {
-  color: var(--danger, #d33);
-  border-color: var(--danger, #d33);
-}
-.cc-account-op-btn:disabled { opacity: .45; cursor: default; }
-
-/* 下拉最后一项：新增账户 */
-.cc-account-add-option {
-  width: 100%;
-  min-height: 38px;
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  border: 0;
-  border-top: 1px solid var(--hairline);
-  background: var(--canvas);
-  color: var(--body);
-  font-family: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-  transition: color .12s, background .12s;
-}
-.cc-account-add-option:hover:not(:disabled) {
-  color: var(--ink);
-  background: var(--canvas-soft);
-}
-.cc-account-add-option:disabled { opacity: .45; cursor: default; }
-.cc-account-add-icon { display: inline-grid; place-items: center; }
-
-.cc-account-empty,
-.cc-account-state {
-  padding: 18px 12px;
-  color: var(--mute);
-  font-size: 12px;
-  line-height: 18px;
-  text-align: center;
-}
-.cc-account-state.error {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: var(--danger, #d33);
-}
-.cc-account-hint {
-  min-height: 14px;
-  margin-top: 7px;
-  color: var(--mute);
-  font-size: 11px;
-  line-height: 14px;
-}
-.cc-account-hint.error { color: var(--danger, #d33); }
-
-/* 新增 / 编辑账户弹窗 */
-.cc-account-scrim { z-index: 88; }
-.modal.cc-account-modal { width: 420px; padding: 24px 28px; }
-.modal.cc-account-modal h2 { margin-bottom: 16px; }
-.cc-account-field { min-width: 0; margin-bottom: 12px; }
-.cc-account-field label {
-  display: block;
-  margin-bottom: 5px;
-  color: var(--mute);
-  font-family: var(--mono);
-  font-size: 10px;
-  line-height: 14px;
-  text-transform: uppercase;
-  user-select: text;
-}
-.cc-account-field input {
-  width: 100%;
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  outline: none;
-  background: var(--canvas);
-  color: var(--ink);
-  font-family: var(--sans);
-  font-size: 12px;
-}
-.cc-account-field input.mono {
-  font-family: var(--mono);
-  font-size: 11px;
-}
-.cc-account-field input:focus { border-color: var(--ink); }
-.cc-account-field input:disabled { opacity: .55; }
-.cc-account-secret {
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
-}
-.cc-account-secret input {
-  min-width: 0;
-  flex: 1;
-  user-select: text;
-}
-.cc-account-secret input[readonly] { cursor: text; }
-.cc-account-eye-btn {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  padding: 0;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  background: var(--canvas);
-  color: var(--mute);
-  cursor: pointer;
-  transition: color .12s, border-color .12s, background .12s;
-}
-.cc-account-eye-btn:hover:not(:disabled) {
-  color: var(--ink);
-  border-color: var(--hairline-strong);
-  background: var(--canvas-soft);
-}
-.cc-account-eye-btn:disabled { opacity: .45; cursor: default; }
-.cc-account-modal-error {
-  min-height: 14px;
-  color: var(--danger, #d33);
-  font-size: 11px;
-  line-height: 14px;
-}
-.modal.cc-account-modal .actions { margin-top: 14px; }
 
 /* ─────────────────────────────────────────────
    CC 版本管理
@@ -2063,6 +1771,18 @@ mark.hl {
   font-weight: 600;
   color: var(--mute);
   letter-spacing: 0.02em;
+}
+/* 智能体分区：页签下第一段不画分隔线；行标题用正文字体，不大写不加宽字距 */
+.set-section[data-section='agent'] [role='tabpanel'] > .set-subhead:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.set-section[data-section='agent'] .set-row label {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--ink);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 /* Ctrl+P 全局搜索：顶部居中，列表定高可滚动、隐藏滚动条 */

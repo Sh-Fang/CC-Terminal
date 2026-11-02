@@ -18,13 +18,16 @@ export interface Settings {
   // true = 每次启动 cc（新建与 --resume 都算）都带 --dangerously-skip-permissions
   dangerousSkipPermissions: boolean
   claudePath: string
-  npmRegistry: string
-  npmMirrorEnabled: boolean    // false = 不用镜像，cc 版本管理走 npm 官方源
   disableAutoupdater: boolean
+  // true = 每次启动 codex 都带 --dangerously-bypass-approvals-and-sandbox
+  codexDangerousSkipPermissions: boolean
+  codexPath: string
+  codexDisableAutoupdater: boolean
+  npmRegistry: string          // 安装智能体版本用的 npm 源
   lastUsedCwd: string
   sidebarWidth: number
   sidebarCollapsed: boolean
-  statusDowngradeSec: number   // done/attention 停留多少秒后降回 idle（1~10）
+  statusDowngradeSec: number   // 查看已完成的标签页多少秒后清掉绿点：1 / 3 / 5；0 = 不自动清除
   closeBehavior: CloseBehavior // 点关闭按钮：quit = 确认后退出；tray = 不确认，收进托盘
   showFloater: boolean         // 开启常驻悬浮窗
   floaterX: number | null
@@ -48,9 +51,11 @@ export const DEFAULT_SETTINGS: Settings = {
   defaults: { cwd: '' },
   dangerousSkipPermissions: false,
   claudePath: '',
-  npmRegistry: 'https://registry.npmmirror.com',
-  npmMirrorEnabled: true,
   disableAutoupdater: true,
+  codexDangerousSkipPermissions: false,
+  codexPath: '',
+  codexDisableAutoupdater: true,
+  npmRegistry: 'https://registry.npmmirror.com',
   lastUsedCwd: '',
   sidebarWidth: 268,
   sidebarCollapsed: false,

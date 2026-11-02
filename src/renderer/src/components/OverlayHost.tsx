@@ -194,7 +194,7 @@ function ModalBody({ cfg }: { cfg: ModalOpts }) {
     const v = {
       name: name.trim(),
       cwd: cfg.kind === 'new-group' || cfg.kind === 'new-tab' ? cwd.trim() : undefined,
-      kind: cfg.showKind ? kind : undefined,
+      kind: cfg.kinds ? kind : undefined,
       tabName: cfg.showTabName ? tabName.trim() : undefined
     }
     if (!v.name) {
@@ -309,11 +309,12 @@ function ModalBody({ cfg }: { cfg: ModalOpts }) {
           onKeyDown={onKeyDown}
         />
       </div>
-      {cfg.showKind && (
+      {/* 只有终端可选时不显示类型选择 */}
+      {cfg.kinds && cfg.kinds.length > 1 && (
         <div className="field" id="modal-kind-field">
           <label>{t('类型')}</label>
           <div className="seg-group kind-pick" role="radiogroup" aria-label={t('类型')}>
-            {KIND_OPTIONS.map((k) => (
+            {KIND_OPTIONS.filter((k) => cfg.kinds!.includes(k.kind)).map((k) => (
               <button
                 key={k.kind}
                 type="button"

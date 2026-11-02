@@ -232,7 +232,7 @@ export function Toolbar() {
                     onClick={() => activateTab(tb.id)}
                     onContextMenu={(e) => {
                       e.preventDefault()
-                      openTabCtx(tb.id, e.clientX, e.clientY)
+                      void openTabCtx(tb.id, e.clientX, e.clientY)
                     }}
                     onDoubleClick={(e) => {
                       const nameEl = e.currentTarget.querySelector('.tabchip-name') as HTMLSpanElement | null

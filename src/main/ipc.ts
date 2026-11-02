@@ -5,29 +5,22 @@ import { request as httpRequest } from 'node:http'
 import { createPty, killPty, killPtyAndWait, resizePty, shellPids, writePty } from './pty-manager'
 import { currentForeground, pokeForeground, startForegroundWatch } from './foreground'
 import { applyOp, setStoreChangeListener, snapshot, type StoreOp } from './store'
-import { detectClaudePath, isClaudeAvailable, sessionExists } from './claude-helper'
-import { codexSessionExists, isCodexAvailable } from './codex-helper'
+import { agentPathSetting, isAgentAvailable, sessionExists } from './claude-helper'
+import { codexSessionExists } from './codex-helper'
 import {
-  cancelInstall as ccCancelInstall,
-  install as ccInstall,
-  listInstalled as ccListInstalled,
-  listRemote as ccListRemote,
-  uninstall as ccUninstall,
-  versionFromPath as ccVersionFromPath
+  cancelInstall as verCancelInstall,
+  install as verInstall,
+  listInstalled as verListInstalled,
+  listRemote as verListRemote,
+  uninstall as verUninstall,
+  versionFromPath as verFromPath
 } from './cc-versions'
 import { ensureHookAssets, type HookPaths } from './hook-assets'
 import { readSessionMeta } from './jsonl-reader'
 import { loadSettings, saveSettings, type Settings } from './settings'
 import { applyDisableAutoupdater, readUserEnv } from './sys-env'
 import { readClipboardSelection, writeClipboardText } from './clipboard'
-import {
-  activateClaudeAccount,
-  deleteClaudeAccount,
-  getClaudeAccount,
-  loadClaudeAccounts,
-  saveClaudeAccount
-} from './claude-accounts'
-import type { SaveClaudeAccountInput } from '../shared/claude-accounts'
+import type { AgentKind } from '../shared/store-types'
 import { isSafeExternalUrl } from './url-safety'
 import {
   checkForUpdate,
@@ -44,11 +37,13 @@ function shouldDisableAutoupdate(): boolean {
   try { return loadSettings().disableAutoupdater } catch { return true }
 }
 
-// npm 镜像开关关闭时 cc 版本管理走官方源（渲染层下拉里它也是候选之一）
-const NPM_OFFICIAL_REGISTRY = 'https://registry.npmjs.org'
-function effectiveNpmRegistry(): string {
-  const s = loadSettings()
-  return s.npmMirrorEnabled ? s.npmRegistry : NPM_OFFICIAL_REGISTRY
+function npmRegistry(): string {
+  return loadSettings().npmRegistry
+}
+
+// 渲染层传来的智能体名只认这两个
+function agentOf(v: unknown): AgentKind {
+  return v === 'codex' ? 'codex' : 'claude'
 }
 
 // npm 镜像测速：HEAD 请求测响应头到达耗时，任何状态码都算通；超时/连不上返回 -1
@@ -211,54 +206,42 @@ export function registerPtyIpc(
   ipcMain.handle('window:isMaximized', (e) => winFromEvent(e)?.isMaximized() ?? false)
 
   ipcMain.handle('app:version', () => app.getVersion())
-  ipcMain.handle('claude:available', () => isClaudeAvailable())
+  ipcMain.handle('agent:available', (_e, agent: unknown) => isAgentAvailable(agentOf(agent)))
   ipcMain.handle('claude:sessionExists', (_e, sessionId: string) => sessionExists(sessionId))
-  ipcMain.handle('codex:available', () => isCodexAvailable())
   ipcMain.handle('codex:sessionExists', (_e, sessionId: string) => codexSessionExists(sessionId))
   ipcMain.handle('claude:sessionMeta', (_e, sessionId: string) => readSessionMeta(sessionId))
-  ipcMain.handle('claude:detect', () => detectClaudePath())
-  ipcMain.handle('cc:listInstalled', () => {
-    try { return ccListInstalled(loadSettings().claudePath) } catch { return [] }
+  ipcMain.handle('ver:listInstalled', (_e, agent: unknown) => {
+    const a = agentOf(agent)
+    try { return verListInstalled(a, agentPathSetting(a)) } catch { return [] }
   })
-  ipcMain.handle('cc:listRemote', async () => {
-    try { return { ok: true, versions: await ccListRemote(effectiveNpmRegistry()) } }
+  ipcMain.handle('ver:listRemote', async (_e, agent: unknown) => {
+    try { return { ok: true, versions: await verListRemote(agentOf(agent), npmRegistry()) } }
     catch (e) { return { ok: false, error: (e as Error).message, versions: [] as string[] } }
   })
-  ipcMain.handle('cc:install', async (e, version: string) => {
+  ipcMain.handle('ver:install', async (e, agent: unknown, version: string) => {
     if (typeof version !== 'string' || !version.trim()) {
       return { ok: false, version, error: '版本号为空' }
     }
+    const a = agentOf(agent)
     const wc = e.sender
     const ver = version.trim()
     const onPhase = (phase: string): void => {
       if (!wc || wc.isDestroyed()) return
-      try { wc.send('cc:install:phase', { version: ver, phase }) } catch {}
+      try { wc.send('ver:install:phase', { agent: a, version: ver, phase }) } catch {}
     }
-    return ccInstall(ver, effectiveNpmRegistry(), onPhase)
+    return verInstall(a, ver, npmRegistry(), onPhase)
   })
   ipcMain.handle('npm:ping', (_e, url: string) => pingRegistry(String(url ?? '')))
-  ipcMain.handle('cc:uninstall', (_e, version: string) =>
-    typeof version === 'string' ? ccUninstall(version) : { ok: false, error: '版本号非法' }
+  ipcMain.handle('ver:uninstall', (_e, agent: unknown, version: string) =>
+    typeof version === 'string' ? verUninstall(agentOf(agent), version) : { ok: false, error: '版本号非法' }
   )
-  ipcMain.handle('cc:installCancel', (_e, version: string) =>
-    typeof version === 'string' ? ccCancelInstall(version) : { ok: false, error: '版本号非法' }
+  ipcMain.handle('ver:installCancel', (_e, agent: unknown, version: string) =>
+    typeof version === 'string' ? verCancelInstall(agentOf(agent), version) : { ok: false, error: '版本号非法' }
   )
-  ipcMain.handle('cc:currentVersion', () => {
-    try { return ccVersionFromPath(loadSettings().claudePath) } catch { return null }
+  ipcMain.handle('ver:current', (_e, agent: unknown) => {
+    const a = agentOf(agent)
+    try { return verFromPath(a, agentPathSetting(a)) } catch { return null }
   })
-  ipcMain.handle('claude-accounts:load', () => loadClaudeAccounts())
-  ipcMain.handle('claude-accounts:get', (_e, id: unknown) =>
-    getClaudeAccount(typeof id === 'string' ? id : null)
-  )
-  ipcMain.handle('claude-accounts:save', (_e, input: unknown) =>
-    saveClaudeAccount(input as SaveClaudeAccountInput)
-  )
-  ipcMain.handle('claude-accounts:activate', (_e, id: unknown) =>
-    activateClaudeAccount(typeof id === 'string' ? id : '')
-  )
-  ipcMain.handle('claude-accounts:delete', (_e, id: unknown) =>
-    deleteClaudeAccount(typeof id === 'string' ? id : '')
-  )
 
   ipcMain.handle('path:exists', (_e, p: string) => {
     if (typeof p !== 'string' || !p) return false

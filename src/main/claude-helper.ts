@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import type { AgentKind } from '../shared/store-types'
+import { loadSettings } from './settings'
 
 export { sessionExists } from './claude-paths'
 
@@ -21,32 +23,15 @@ export function whichAllViaLoginShell(name: string): string[] {
   }
 }
 
-let cachedAvailable: boolean | null = null
-
-export function isClaudeAvailable(): boolean {
-  if (cachedAvailable != null) return cachedAvailable
-  if (!IS_WIN) {
-    cachedAvailable = whichAllViaLoginShell('claude').length > 0
-    return cachedAvailable
-  }
-  try {
-    const out = execFileSync('where.exe', ['claude'], { encoding: 'utf8', windowsHide: true })
-    cachedAvailable = out.split(/\r?\n/).some((l) => l.trim().length > 0)
-  } catch {
-    cachedAvailable = false
-  }
-  return cachedAvailable
-}
-
-// 返回 claude 可执行路径；找不到返回 null。
+// 返回 PATH 上的可执行路径；找不到返回 null。
 // Windows 按扩展名优先级挑：.cmd > .ps1 > .exe > 其他；类 Unix 取 which 首条。
-export function detectClaudePath(): string | null {
+export function detectAgentPath(agent: AgentKind): string | null {
   if (!IS_WIN) {
-    const cands = whichAllViaLoginShell('claude')
+    const cands = whichAllViaLoginShell(agent)
     return cands[0] ?? null
   }
   try {
-    const out = execFileSync('where.exe', ['claude'], { encoding: 'utf8', windowsHide: true })
+    const out = execFileSync('where.exe', [agent], { encoding: 'utf8', windowsHide: true })
     const cands = out
       .split(/\r?\n/)
       .map((l) => l.trim())
@@ -64,4 +49,32 @@ export function detectClaudePath(): string | null {
   } catch {
     return null
   }
+}
+
+// PATH 查找结果短时缓存：打开设置、新建标签页、右键菜单会连着问，类 Unix 走登录 shell 较慢
+const PATH_CACHE_MS = 3000
+const pathCache = new Map<AgentKind, { at: number; path: string | null }>()
+
+function detectAgentPathCached(agent: AgentKind): string | null {
+  const hit = pathCache.get(agent)
+  if (hit && Date.now() - hit.at < PATH_CACHE_MS) {
+    return hit.path
+  }
+  const path = detectAgentPath(agent)
+  pathCache.set(agent, { at: Date.now(), path })
+  return path
+}
+
+export function agentPathSetting(agent: AgentKind): string {
+  const s = loadSettings()
+  return (agent === 'codex' ? s.codexPath : s.claudePath).trim()
+}
+
+// 找得到 = 设置里选定的可执行文件存在，或 PATH 上有
+export function isAgentAvailable(agent: AgentKind): boolean {
+  const p = agentPathSetting(agent)
+  if (p && existsSync(p)) {
+    return true
+  }
+  return detectAgentPathCached(agent) != null
 }

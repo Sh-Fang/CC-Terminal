@@ -2,27 +2,38 @@ import { app } from 'electron'
 import { execFile, execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import type { AgentKind } from '../shared/store-types'
 
-// cc 多版本管理：每版装到 <userData>/cc-versions/<version>/（npm install -g --prefix 隔离），
-// 切换 = 把 settings.claudePath 指向对应 claude.cmd；登录态在 ~/.claude/ 全局共享，不用重登。
+// 智能体多版本管理：每版装到 <userData>/<目录>/<version>/（npm install -g --prefix 隔离），
+// 切换 = 把 settings.claudePath / codexPath 指向对应可执行文件；登录态在各自家目录全局共享，不用重登。
 
-export const CC_PACKAGE = '@anthropic-ai/claude-code'
+interface AgentSpec {
+  pkg: string
+  bin: string
+  dir: string
+}
+const AGENTS: Record<AgentKind, AgentSpec> = {
+  claude: { pkg: '@anthropic-ai/claude-code', bin: 'claude', dir: 'cc-versions' },
+  codex: { pkg: '@openai/codex', bin: 'codex', dir: 'codex-versions' }
+}
 export const DEFAULT_NPM_REGISTRY = 'https://registry.npmmirror.com'
 
 const IS_WIN = process.platform === 'win32'
 
 // npm --prefix 产物布局：Windows 在 <dir>/ 根下；类 Unix 在 <dir>/bin 与 <dir>/lib/node_modules
-function claudeBinPath(prefix: string): string {
-  return IS_WIN ? join(prefix, 'claude.cmd') : join(prefix, 'bin', 'claude')
+function binPath(agent: AgentKind, prefix: string): string {
+  const bin = AGENTS[agent].bin
+  return IS_WIN ? join(prefix, `${bin}.cmd`) : join(prefix, 'bin', bin)
 }
-function pkgJsonPath(prefix: string): string {
+function pkgJsonPath(agent: AgentKind, prefix: string): string {
+  const pkg = AGENTS[agent].pkg
   return IS_WIN
-    ? join(prefix, 'node_modules', CC_PACKAGE, 'package.json')
-    : join(prefix, 'lib', 'node_modules', CC_PACKAGE, 'package.json')
+    ? join(prefix, 'node_modules', pkg, 'package.json')
+    : join(prefix, 'lib', 'node_modules', pkg, 'package.json')
 }
-// 从 claude 可执行路径反推安装 prefix
-function prefixFromClaudeBin(binPath: string): string {
-  return IS_WIN ? dirname(binPath) : dirname(dirname(binPath))
+// 从可执行路径反推安装 prefix
+function prefixFromBin(path: string): string {
+  return IS_WIN ? dirname(path) : dirname(dirname(path))
 }
 
 // 用登录 shell 解析命令绝对路径（macOS GUI 进程 PATH 极简）
@@ -42,9 +53,9 @@ function whichViaLoginShell(name: string): string | null {
 
 export interface InstalledVersion {
   version: string
-  path: string        // claude.cmd 绝对路径
+  path: string        // 可执行文件绝对路径
   installedAt: number // 目录 mtime，用于排序兜底
-  active: boolean     // 当前 settings.claudePath 是否指向这一版
+  active: boolean     // 当前 settings 里的路径是否指向这一版
 }
 
 export interface InstallResult {
@@ -55,8 +66,8 @@ export interface InstallResult {
 }
 
 
-function versionsRoot(): string {
-  const d = join(app.getPath('userData'), 'cc-versions')
+function versionsRoot(agent: AgentKind): string {
+  const d = join(app.getPath('userData'), AGENTS[agent].dir)
   if (!existsSync(d)) mkdirSync(d, { recursive: true })
   return d
 }
@@ -78,7 +89,19 @@ function cmpSemver(a: string, b: string): number {
   if (ap === bp) return 0
   if (!ap) return 1
   if (!bp) return -1
-  return ap < bp ? -1 : 1
+  // pre-release 按点分段比较，纯数字段按数值比（alpha.12 > alpha.3）
+  const sa = ap.split('.')
+  const sb = bp.split('.')
+  for (let i = 0; i < Math.max(sa.length, sb.length); i++) {
+    if (sa[i] === undefined) return -1
+    if (sb[i] === undefined) return 1
+    if (sa[i] === sb[i]) continue
+    const na = /^\d+$/.test(sa[i]) ? Number(sa[i]) : NaN
+    const nb = /^\d+$/.test(sb[i]) ? Number(sb[i]) : NaN
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb
+    return sa[i] < sb[i] ? -1 : 1
+  }
+  return 0
 }
 
 // 找系统 npm；结果缓存到进程生命周期
@@ -145,9 +168,9 @@ function safeRegistry(reg: string): string {
   return REGISTRY_RE.test(v) ? v : DEFAULT_NPM_REGISTRY
 }
 
-function readPkgVersion(dir: string): string | null {
+function readPkgVersion(agent: AgentKind, dir: string): string | null {
   try {
-    const p = pkgJsonPath(dir)
+    const p = pkgJsonPath(agent, dir)
     if (!existsSync(p)) return null
     const j = JSON.parse(readFileSync(p, 'utf8')) as { version?: unknown }
     return typeof j.version === 'string' ? j.version : null
@@ -156,8 +179,8 @@ function readPkgVersion(dir: string): string | null {
   }
 }
 
-export function listInstalled(activePath: string): InstalledVersion[] {
-  const root = versionsRoot()
+export function listInstalled(agent: AgentKind, activePath: string): InstalledVersion[] {
+  const root = versionsRoot(agent)
   const active = (activePath || '').toLowerCase()
   const out: InstalledVersion[] = []
   let entries: string[] = []
@@ -168,9 +191,9 @@ export function listInstalled(activePath: string): InstalledVersion[] {
     let st
     try { st = statSync(dir) } catch { continue }
     if (!st.isDirectory()) continue
-    const pkgVer = readPkgVersion(dir)
+    const pkgVer = readPkgVersion(agent, dir)
     if (!pkgVer) continue
-    const cmd = claudeBinPath(dir)
+    const cmd = binPath(agent, dir)
     if (!existsSync(cmd)) continue
     out.push({
       version: pkgVer,
@@ -183,14 +206,14 @@ export function listInstalled(activePath: string): InstalledVersion[] {
   return out
 }
 
-// 从任意 claude 可执行路径反查版本号：先按托管布局反推 prefix 读版本，
-// 再向上逐级找 @anthropic-ai/claude-code/package.json；找不到返回 null。
-export function versionFromPath(claudePath: string): string | null {
-  if (!claudePath) return null
-  const prefix = prefixFromClaudeBin(claudePath)
-  const v1 = readPkgVersion(prefix)
+// 从任意可执行路径反查版本号：先按托管布局反推 prefix 读版本，
+// 再向上逐级找同名包的 package.json；找不到返回 null。
+export function versionFromPath(agent: AgentKind, path: string): string | null {
+  if (!path) return null
+  const prefix = prefixFromBin(path)
+  const v1 = readPkgVersion(agent, prefix)
   if (v1) return v1
-  let cur = claudePath
+  let cur = path
   for (let i = 0; i < 8; i++) {
     const parent = dirname(cur)
     if (parent === cur) break
@@ -199,27 +222,30 @@ export function versionFromPath(claudePath: string): string | null {
       const pkgPath = join(cur, 'package.json')
       if (existsSync(pkgPath)) {
         const j = JSON.parse(readFileSync(pkgPath, 'utf8')) as { name?: unknown; version?: unknown }
-        if (j.name === CC_PACKAGE && typeof j.version === 'string') return j.version
+        if (j.name === AGENTS[agent].pkg && typeof j.version === 'string') return j.version
       }
     } catch {}
   }
   return null
 }
 
-export async function listRemote(registry: string): Promise<string[]> {
+// codex 把各平台二进制作为同包的「<版本>-<平台>-<架构>」版本发布，不是可装的独立版本
+const PLATFORM_BUILD_RE = /-(?:darwin|linux|win32)-(?:x64|arm64)$/
+
+export async function listRemote(agent: AgentKind, registry: string): Promise<string[]> {
   const inv = resolveNpmInvocation()
   if (!inv) throw new Error('未找到 npm，请检查 Node.js 安装')
   const reg = safeRegistry(registry)
   return new Promise((resolve, reject) => {
     execFile(
       inv.file,
-      [...inv.lead, 'view', CC_PACKAGE, 'versions', '--json', `--registry=${reg}`],
+      [...inv.lead, 'view', AGENTS[agent].pkg, 'versions', '--json', `--registry=${reg}`],
       { encoding: 'utf8', windowsHide: true, maxBuffer: 20 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) return reject(new Error(stderr?.trim() || err.message))
         try {
           const raw = JSON.parse(stdout) as unknown
-          const arr = Array.isArray(raw) ? raw.map(String) : []
+          const arr = Array.isArray(raw) ? raw.map(String).filter((v) => !PLATFORM_BUILD_RE.test(v)) : []
           arr.sort(cmpSemver).reverse()
           resolve(arr)
         } catch (e) {
@@ -230,7 +256,7 @@ export async function listRemote(registry: string): Promise<string[]> {
   })
 }
 
-// 在跑的安装进程，key = version，供 cancel 调用
+// 在跑的安装进程，key = <智能体>:<version>，供 cancel 调用
 interface InflightInstall {
   proc: ReturnType<typeof spawn>
   prefix: string
@@ -243,6 +269,7 @@ const inflightInstalls = new Map<string, InflightInstall>()
 const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g
 
 export function install(
+  agent: AgentKind,
   version: string,
   registry: string,
   onPhase: (phase: string) => void
@@ -251,7 +278,8 @@ export function install(
   if (!VERSION_RE.test(ver) && ver !== 'latest') {
     return Promise.resolve({ ok: false, version: ver, error: '版本号格式非法' })
   }
-  if (inflightInstalls.has(ver)) {
+  const key = `${agent}:${ver}`
+  if (inflightInstalls.has(key)) {
     return Promise.resolve({ ok: false, version: ver, error: '同一版本正在安装中' })
   }
   const inv = resolveNpmInvocation()
@@ -260,12 +288,12 @@ export function install(
   // latest 先装到临时目录，装完读真实版本改名
   const useTmp = ver === 'latest'
   const dirName = useTmp ? `_pending_${Date.now()}` : ver
-  const prefix = join(versionsRoot(), dirName)
+  const prefix = join(versionsRoot(agent), dirName)
   const createdDir = !existsSync(prefix)
   if (createdDir) mkdirSync(prefix, { recursive: true })
   const args = [
     ...inv.lead,
-    'install', '-g', `${CC_PACKAGE}@${ver}`,
+    'install', '-g', `${AGENTS[agent].pkg}@${ver}`,
     `--prefix=${prefix}`,
     `--registry=${reg}`,
     '--no-audit', '--no-fund', '--no-package-lock'
@@ -274,7 +302,7 @@ export function install(
   return new Promise((resolve) => {
     const p = spawn(inv.file, args, { windowsHide: true })
     const state: InflightInstall = { proc: p, prefix, createdDir, cancelled: false }
-    inflightInstalls.set(ver, state)
+    inflightInstalls.set(key, state)
     const cleanupOnFail = (): void => {
       // 只清理本次新建的目录，已装的同版本不能误删
       if (state.createdDir) { try { rmSync(prefix, { recursive: true, force: true }) } catch {} }
@@ -297,12 +325,12 @@ export function install(
     p.stdout.on('data', handleChunk)
     p.stderr.on('data', handleChunk)
     p.on('error', (e) => {
-      inflightInstalls.delete(ver)
+      inflightInstalls.delete(key)
       cleanupOnFail()
       resolve({ ok: false, version: ver, error: e.message })
     })
     p.on('exit', (code) => {
-      inflightInstalls.delete(ver)
+      inflightInstalls.delete(key)
       if (state.cancelled) {
         cleanupOnFail()
         return resolve({ ok: false, version: ver, error: '已取消' })
@@ -311,10 +339,10 @@ export function install(
         cleanupOnFail()
         return resolve({ ok: false, version: ver, error: `npm 退出码 ${code}` })
       }
-      const realVer = readPkgVersion(prefix) ?? ver
+      const realVer = readPkgVersion(agent, prefix) ?? ver
       let finalPrefix = prefix
       if (useTmp) {
-        finalPrefix = join(versionsRoot(), realVer)
+        finalPrefix = join(versionsRoot(agent), realVer)
         try {
           if (existsSync(finalPrefix)) rmSync(finalPrefix, { recursive: true, force: true })
           renameSync(prefix, finalPrefix)
@@ -322,9 +350,9 @@ export function install(
           finalPrefix = prefix
         }
       }
-      const cmd = claudeBinPath(finalPrefix)
+      const cmd = binPath(agent, finalPrefix)
       if (!existsSync(cmd)) {
-        return resolve({ ok: false, version: realVer, error: '未生成 claude 可执行文件（可能包结构变了）' })
+        return resolve({ ok: false, version: realVer, error: `未生成 ${AGENTS[agent].bin} 可执行文件（可能包结构变了）` })
       }
       resolve({ ok: true, version: realVer, path: cmd })
     })
@@ -332,9 +360,8 @@ export function install(
 }
 
 // 取消正在进行的安装（Windows 上 SIGTERM 被 libuv 翻成 TerminateProcess，可立即中断）
-export function cancelInstall(version: string): { ok: boolean; error?: string } {
-  const v = version.trim()
-  const inf = inflightInstalls.get(v)
+export function cancelInstall(agent: AgentKind, version: string): { ok: boolean; error?: string } {
+  const inf = inflightInstalls.get(`${agent}:${version.trim()}`)
   if (!inf) return { ok: false, error: '没有正在进行的安装任务' }
   inf.cancelled = true
   try {
@@ -345,9 +372,9 @@ export function cancelInstall(version: string): { ok: boolean; error?: string } 
   }
 }
 
-export function uninstall(version: string): { ok: boolean; error?: string } {
+export function uninstall(agent: AgentKind, version: string): { ok: boolean; error?: string } {
   if (!VERSION_RE.test(version)) return { ok: false, error: '版本号格式非法' }
-  const dir = join(versionsRoot(), version)
+  const dir = join(versionsRoot(agent), version)
   if (!existsSync(dir)) return { ok: true }
   try {
     rmSync(dir, { recursive: true, force: true })

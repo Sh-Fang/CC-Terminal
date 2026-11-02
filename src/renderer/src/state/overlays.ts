@@ -23,7 +23,8 @@ export interface ModalInput {
   sub: string
   name: string
   cwd?: string
-  showKind?: boolean
+  // 新建标签页可选的类型；不传 = 不选类型
+  kinds?: NewTabKind[]
   showTabName?: boolean
   tabName?: string
   okLabel?: string

@@ -1,5 +1,5 @@
 // 设置面板：开合订阅 overlays；表单打开时从 getSettings() 绑定一次，每次变更整装新 Settings 提交。
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DEFAULT_SETTINGS,
   type Settings,
@@ -26,36 +26,10 @@ import { icon } from "../svg-icons";
 import { t } from "../i18n";
 import { getSettings, updateSettings } from "../controller";
 import { useAppStore } from "../state/store";
-import { ClaudeAccountSection } from "./ClaudeAccountSection";
+import { AgentVersions } from "./AgentVersions";
 import { BrandLogo } from "./BrandLogo";
 import { escapeHtml } from "../lib/format";
-
-// 与 preload 的 InstalledCcVersion 同构；跨 tsconfig import 会报 TS6307，手抄一份
-interface InstalledCcVersion {
-  version: string;
-  path: string;
-  installedAt: number;
-  active: boolean;
-}
-
-const CC_PAGE_SIZE = 10;
-
-// 简易 semver 比较：与主进程 cc-versions.ts 保持一致；pre-release 视为更小
-function cmpSemver(a: string, b: string): number {
-  const [ah, ap = ""] = a.split("-", 2);
-  const [bh, bp = ""] = b.split("-", 2);
-  const pa = ah.split(".").map((x) => parseInt(x, 10) || 0);
-  const pb = bh.split(".").map((x) => parseInt(x, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const da = pa[i] || 0;
-    const db = pb[i] || 0;
-    if (da !== db) return da - db;
-  }
-  if (ap === bp) return 0;
-  if (!ap) return 1;
-  if (!bp) return -1;
-  return ap < bp ? -1 : 1;
-}
+import type { AgentKind } from "../../../shared/store-types";
 
 function clamp(n: number, min: number, max: number, fb: number): number {
   if (!Number.isFinite(n)) return fb;
@@ -67,7 +41,12 @@ function clamp(n: number, min: number, max: number, fb: number): number {
 const NPM_MIRRORS: { name: string; url: string }[] = [
   { name: "腾讯云", url: "https://mirrors.cloud.tencent.com/npm/" },
   { name: "阿里云", url: "https://registry.npmmirror.com" },
-  { name: "官方镜像", url: "https://registry.npmjs.org" },
+  { name: "npm 官方", url: "https://registry.npmjs.org" },
+];
+
+const AGENT_TABS: { kind: AgentKind; label: string }[] = [
+  { kind: "claude", label: "Claude" },
+  { kind: "codex", label: "Codex" },
 ];
 
 function normUrl(u: string): string {
@@ -111,7 +90,6 @@ interface Form {
   line: string;
   scrollback: string;
   npmReg: string;
-  npmMirror: boolean;
   theme: string;
   appTheme: string;
   tabBarMode: string;
@@ -121,6 +99,8 @@ interface Form {
   cursorBlink: boolean;
   dangerMode: boolean;
   disableUpd: boolean;
+  codexDangerMode: boolean;
+  codexDisableUpd: boolean;
   showFloater: boolean;
   language: AppLanguage;
 }
@@ -133,7 +113,6 @@ function formFromSettings(s: Settings): Form {
     line: String(s.font.lineHeight),
     scrollback: String(s.terminal.scrollback),
     npmReg: s.npmRegistry,
-    npmMirror: s.npmMirrorEnabled !== false,
     theme: s.terminal.theme,
     appTheme: s.appTheme,
     tabBarMode: s.tabBarMode || "vertical",
@@ -143,31 +122,11 @@ function formFromSettings(s: Settings): Form {
     cursorBlink: s.cursor.blink,
     dangerMode: s.dangerousSkipPermissions,
     disableUpd: s.disableAutoupdater,
+    codexDangerMode: s.codexDangerousSkipPermissions,
+    codexDisableUpd: s.codexDisableAutoupdater,
     showFloater: s.showFloater,
     language: s.language || "zh",
   };
-}
-
-// CC 版本管理内部状态：塞进 ref 对象手动 rerender，避免异步流程踩 React state 闭包陈旧坑
-interface CcState {
-  installedSet: Set<string>;
-  installedMap: Map<string, { path: string; active: boolean }>;
-  remote: string[];
-  activeVersion: string; // 托管路径命中的版本
-  detectedVersion: string; // 从 claudePath 反查到的版本（含自定义路径场景）
-  installingVer: string;
-  loaded: boolean;
-  infoLoaded: boolean; // applyInstalled 至少跑过一次
-  page: number;
-  // 首次拉完远端后自动跳到含使用中版本的页；之后不再自动跳
-  autoJumpPending: boolean;
-  installStartTs: number;
-  installPhase: string;
-  hintText: string;
-  hintKind: "" | "ok" | "err";
-  refreshing: boolean;
-  search: string;
-  onlyInstalled: boolean;
 }
 
 export function SettingsPanel() {
@@ -182,6 +141,12 @@ export function SettingsPanel() {
   const formRef = useRef(form);
   formRef.current = form;
   const [section, setSection] = useState("appearance");
+  const [agentTab, setAgentTab] = useState<AgentKind>("claude");
+  // 找不到的智能体只显示版本区，方便安装
+  const [agentAvail, setAgentAvail] = useState<Record<AgentKind, boolean>>({
+    claude: true,
+    codex: true,
+  });
   const [langOpen, setLangOpen] = useState(false);
   const [langHintShown, setLangHintShown] = useState(false);
   const lastDisableUpdRef = useRef<boolean | null>(null);
@@ -192,7 +157,7 @@ export function SettingsPanel() {
   const [npmLat, setNpmLat] = useState<Record<string, number | undefined>>({});
   const npmLatRef = useRef(npmLat);
   npmLatRef.current = npmLat;
-  const npmBtnRef = useRef<HTMLButtonElement>(null);
+  const npmBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const [aboutVer, setAboutVer] = useState("—");
   const aboutVerLoadedRef = useRef(false);
@@ -366,30 +331,6 @@ export function SettingsPanel() {
     });
   }, []);
 
-  const cc = useRef<CcState>({
-    installedSet: new Set(),
-    installedMap: new Map(),
-    remote: [],
-    activeVersion: "",
-    detectedVersion: "",
-    installingVer: "",
-    loaded: false,
-    infoLoaded: false,
-    page: 1,
-    autoJumpPending: true,
-    installStartTs: 0,
-    installPhase: "",
-    hintText: "",
-    hintKind: "",
-    refreshing: false,
-    search: "",
-    onlyInstalled: false,
-  }).current;
-  const [, setCcTick] = useState(0);
-  const rerender = (): void => setCcTick((v) => v + 1);
-  const ccInstallTickerRef = useRef<number | null>(null);
-  const ccInstallPhaseUnsubRef = useRef<(() => void) | null>(null);
-
   function doCommit(f: Form): void {
     const cur = getSettings();
     const next: Settings = {
@@ -421,14 +362,15 @@ export function SettingsPanel() {
         cwd: cur.defaults.cwd,
       },
       dangerousSkipPermissions: f.dangerMode,
-      // claudePath 由 CC 版本管理维护，面板不直接编辑（...cur 已带上）
-      npmRegistry: f.npmReg.trim() || DEFAULT_SETTINGS.npmRegistry,
-      npmMirrorEnabled: f.npmMirror,
+      // claudePath / codexPath 由版本管理维护，面板不直接编辑（...cur 已带上）
       disableAutoupdater: f.disableUpd,
+      codexDangerousSkipPermissions: f.codexDangerMode,
+      codexDisableAutoupdater: f.codexDisableUpd,
+      npmRegistry: f.npmReg.trim() || DEFAULT_SETTINGS.npmRegistry,
       statusDowngradeSec: clamp(
         Number(f.downgradeSec),
-        1,
-        10,
+        0,
+        5,
         cur.statusDowngradeSec
       ),
       showFloater: f.showFloater,
@@ -467,7 +409,15 @@ export function SettingsPanel() {
     } catch {}
   }
 
-  // 打开时：绑定表单 + 回到外观分区 + 环境变量一致性补写
+  async function refreshAgentAvail(): Promise<void> {
+    const [claude, codex] = await Promise.all([
+      window.term.agentAvailable("claude"),
+      window.term.agentAvailable("codex"),
+    ]);
+    setAgentAvail({ claude, codex });
+  }
+
+  // 打开时：绑定表单 + 回到外观分区 + 环境变量一致性补写 + 重新检测智能体
   const prevOpenRef = useRef(false);
   useEffect(() => {
     if (open && !prevOpenRef.current) {
@@ -477,7 +427,9 @@ export function SettingsPanel() {
       setForm(f);
       lastDisableUpdRef.current = s.disableAutoupdater;
       setSection("appearance");
+      setAgentTab("claude");
       void ensureUpdConsistency();
+      void refreshAgentAvail();
     }
     prevOpenRef.current = open;
   }, [open]);
@@ -505,223 +457,12 @@ export function SettingsPanel() {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  // 卸载兜底清理（组件常驻，仅热更/整树卸载时触发）
-  useEffect(
-    () => () => {
-      ccInstallPhaseUnsubRef.current?.();
-      if (ccInstallTickerRef.current !== null)
-        clearInterval(ccInstallTickerRef.current);
-    },
-    []
-  );
-
   function activateSection(name: string): void {
     setSection(name);
-    if (name === "claude") {
-      ensureInstallPhaseSub();
-      // 首次打开必拉远端；之后只刷新已安装，远端靠「刷新」按钮重拉
-      void refresh(!cc.loaded);
-    }
     if (name === "about" && !aboutVerLoadedRef.current) {
       aboutVerLoadedRef.current = true;
       void window.term.appVersion().then((v) => setAboutVer(v));
     }
-  }
-
-  function ensureInstallPhaseSub(): void {
-    if (ccInstallPhaseUnsubRef.current) return;
-    ccInstallPhaseUnsubRef.current = window.term.onCcInstallPhase(
-      ({ version, phase }) => {
-        if (version === cc.installingVer) {
-          cc.installPhase = phase;
-          rerender();
-        }
-      }
-    );
-  }
-
-  function setCcHint(text: string, kind: "" | "ok" | "err"): void {
-    cc.hintText = text;
-    cc.hintKind = kind;
-  }
-
-  function applyInstalled(
-    list: InstalledCcVersion[],
-    curVer: string | null
-  ): void {
-    cc.installedSet = new Set(list.map((v) => v.version));
-    cc.installedMap = new Map(
-      list.map((v) => [v.version, { path: v.path, active: v.active }])
-    );
-    const active = list.find((v) => v.active);
-    cc.activeVersion = active?.version ?? "";
-    cc.detectedVersion = curVer ?? "";
-    cc.infoLoaded = true;
-  }
-
-  async function refresh(fetchRemote: boolean): Promise<void> {
-    if (fetchRemote) {
-      cc.refreshing = true;
-      rerender();
-      try {
-        const [installed, remoteRes, curVer] = await Promise.all([
-          window.term.ccListInstalled(),
-          window.term.ccListRemote(),
-          window.term.ccCurrentVersion(),
-        ]);
-        applyInstalled(installed, curVer);
-        if (remoteRes.ok) {
-          cc.remote = remoteRes.versions;
-          cc.loaded = true;
-          setCcHint("", "");
-        } else {
-          setCcHint(
-            t("远端版本拉取失败：{0}", t(remoteRes.error ?? "未知")),
-            "err"
-          );
-        }
-      } finally {
-        cc.refreshing = false;
-      }
-    } else {
-      const [installed, curVer] = await Promise.all([
-        window.term.ccListInstalled(),
-        window.term.ccCurrentVersion(),
-      ]);
-      applyInstalled(installed, curVer);
-    }
-    if (fetchRemote && cc.autoJumpPending) {
-      const pg = pageOfCurrent();
-      if (pg > 0) cc.page = pg;
-      cc.autoJumpPending = false;
-    }
-    rerender();
-  }
-
-  function computeFiltered(): string[] {
-    const q = cc.search.trim().toLowerCase();
-    const onlyInstalled = cc.onlyInstalled;
-    const all = new Set<string>(cc.remote);
-    for (const v of cc.installedSet) all.add(v);
-    if (cc.detectedVersion) all.add(cc.detectedVersion);
-    const versions = Array.from(all).sort(cmpSemver).reverse();
-    // 「已安装」= 托管的 ∪ 反查到的
-    const isInstalledForFilter = (v: string): boolean =>
-      cc.installedSet.has(v) ||
-      (!!cc.detectedVersion && v === cc.detectedVersion);
-    return versions.filter((v) => {
-      if (onlyInstalled && !isInstalledForFilter(v)) return false;
-      if (q && !v.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }
-
-  function pageOfCurrent(): number {
-    const target = cc.activeVersion || cc.detectedVersion;
-    if (!target) return 0;
-    const list = computeFiltered();
-    const idx = list.indexOf(target);
-    if (idx < 0) return 0;
-    return Math.floor(idx / CC_PAGE_SIZE) + 1;
-  }
-
-  async function activateVersion(path: string): Promise<void> {
-    const cur = getSettings();
-    if (cur.claudePath === path) return;
-    const next = { ...cur, claudePath: path };
-    updateSettings(next);
-    // updateSettings 是 300ms 去抖落盘，refresh 会立即读磁盘；显式 await 一次落盘防抢跑读旧值
-    await window.term.saveSettings(next);
-    await refresh(false);
-  }
-
-  function deleteVersion(version: string): void {
-    confirmDialog({
-      title: t("卸载 CC 版本"),
-      message: t("确定卸载 <b>v{0}</b>？此操作不可恢复。", version),
-      okLabel: t("卸载"),
-      danger: true,
-      onOk: async () => {
-        const res = await window.term.ccUninstall(version);
-        if (!res.ok) {
-          setCcHint(t("卸载失败：{0}", t(res.error ?? "未知")), "err");
-          rerender();
-          return;
-        }
-        void refresh(false);
-      },
-    });
-  }
-
-  function confirmInstall(version: string): void {
-    if (cc.installingVer) return;
-    // 使用中·自定义路径的版本安装 → 语义是"备份到托管"
-    const isBackup =
-      !!cc.detectedVersion &&
-      version === cc.detectedVersion &&
-      !cc.installedSet.has(version);
-    const msg = isBackup
-      ? t(
-          "你现在正用着 <b>v{0}</b>（自定义路径），把它安装到托管一份作为备份？",
-          version
-        )
-      : t(
-          "即将从 <b>npm 镜像</b> 安装 <b>v{0}</b>。",
-          version
-        );
-    confirmDialog({
-      title: isBackup ? t("备份到托管") : t("安装 CC 版本"),
-      message: msg,
-      okLabel: isBackup ? t("备份") : t("安装"),
-      danger: false,
-      onOk: () => void installVersion(version),
-    });
-  }
-
-  async function installVersion(version: string): Promise<void> {
-    if (cc.installingVer) return;
-    cc.installingVer = version;
-    cc.installStartTs = Date.now();
-    cc.installPhase = "";
-    setCcHint("", "");
-    rerender();
-    ccInstallTickerRef.current = window.setInterval(() => rerender(), 700);
-    try {
-      const res = await window.term.ccInstall(version);
-      // '已取消' 是主进程回传的协议串，保持中文比对
-      if (!res.ok && res.error !== "已取消") {
-        setCcHint(t("安装失败：{0}", t(res.error ?? "未知")), "err");
-      }
-    } finally {
-      if (ccInstallTickerRef.current !== null) {
-        clearInterval(ccInstallTickerRef.current);
-        ccInstallTickerRef.current = null;
-      }
-      cc.installingVer = "";
-      cc.installPhase = "";
-      await refresh(false);
-    }
-  }
-
-  async function cancelInstall(version: string): Promise<void> {
-    const res = await window.term.ccInstallCancel(version);
-    if (!res.ok) {
-      setCcHint(t("取消失败：{0}", t(res.error ?? "未知")), "err");
-      rerender();
-    }
-    // 成功后 install() 走 error='已取消' 分支 resolve，由 installVersion 的 finally 收尾
-  }
-
-  function formatInstallingMeta(): string {
-    const secs = Math.max(
-      0,
-      Math.floor((Date.now() - cc.installStartTs) / 1000)
-    );
-    const short =
-      cc.installPhase && cc.installPhase.length > 60
-        ? cc.installPhase.slice(0, 60) + "…"
-        : cc.installPhase;
-    return t("安装中 · {0}s", secs) + (short ? " · " + short : "");
   }
 
   // 语言 picker（showCtxMenu 浮层复用）；已展开时再点收起
@@ -871,172 +612,6 @@ export function SettingsPanel() {
     </div>
   );
 
-  function ccRow(version: string) {
-    const installedInfo = cc.installedMap.get(version);
-    const isManagedActive = version === cc.activeVersion;
-    // detected 且非 managed active 即 external active；托管里的同版本副本作为备份
-    const isExternalActive =
-      !isManagedActive &&
-      !!cc.detectedVersion &&
-      version === cc.detectedVersion;
-    const isActive = isManagedActive || isExternalActive;
-    const isInstalled = !!installedInfo;
-    const isInstalling = version === cc.installingVer;
-
-    let cls = "cvrow";
-    if (isActive) cls += " active";
-    else if (isInstalled) cls += " installed";
-    if (isInstalling) cls += " installing";
-
-    let metaText = "";
-    let metaTitle: string | undefined;
-    if (isInstalling) {
-      metaText = formatInstallingMeta();
-    } else if (isManagedActive) {
-      metaText = t("使用中");
-    } else if (isExternalActive) {
-      metaText = isInstalled
-        ? t("使用中 · 自定义路径 · 已备份到托管")
-        : t("使用中 · 自定义路径");
-    } else if (isInstalled) {
-      metaText = t("已安装");
-      metaTitle = installedInfo!.path;
-    }
-
-    let actions: ReactNode = null;
-    if (isInstalling) {
-      actions = (
-        <button
-          type="button"
-          className="cvrow-btn danger"
-          onClick={() => void cancelInstall(version)}
-        >
-          {t("取消")}
-        </button>
-      );
-    } else if (isManagedActive) {
-      // 托管使用中：禁止自删自切，无按钮
-    } else if (isExternalActive && !isInstalled) {
-      // 使用中但没在托管：给「安装」备份到托管
-      actions = (
-        <button
-          type="button"
-          className="cvrow-btn primary"
-          title={t("把当前版本装到托管目录一份，方便以后随时切回")}
-          disabled={!!cc.installingVer}
-          onClick={() => confirmInstall(version)}
-        >
-          {t("安装")}
-        </button>
-      );
-    } else if (isExternalActive && isInstalled) {
-      // 启用 = claudePath 切到托管副本；卸载 = 只删托管副本
-      actions = (
-        <>
-          <button
-            type="button"
-            className="cvrow-btn primary"
-            title={t("把 claude 路径切换到托管副本")}
-            onClick={() => void activateVersion(installedInfo!.path)}
-          >
-            {t("启用")}
-          </button>
-          <button
-            type="button"
-            className="cvrow-btn danger"
-            title={t("仅删除托管副本，不影响当前正在使用的自定义路径")}
-            onClick={() => deleteVersion(version)}
-          >
-            {t("卸载")}
-          </button>
-        </>
-      );
-    } else if (isInstalled) {
-      actions = (
-        <>
-          <button
-            type="button"
-            className="cvrow-btn primary"
-            onClick={() => void activateVersion(installedInfo!.path)}
-          >
-            {t("启用")}
-          </button>
-          <button
-            type="button"
-            className="cvrow-btn danger"
-            onClick={() => deleteVersion(version)}
-          >
-            {t("卸载")}
-          </button>
-        </>
-      );
-    } else {
-      actions = (
-        <button
-          type="button"
-          className="cvrow-btn primary"
-          disabled={!!cc.installingVer}
-          onClick={() => confirmInstall(version)}
-        >
-          {t("安装")}
-        </button>
-      );
-    }
-
-    return (
-      <div className={cls} data-ver={version} key={version}>
-        <span className="cvrow-rail" />
-        <span className="cvrow-main">
-          <span className="cvrow-num">{version}</span>
-          {metaText ? (
-            <span className="cvrow-meta" title={metaTitle}>
-              {metaText}
-            </span>
-          ) : null}
-        </span>
-        <span className="cvrow-act">{actions}</span>
-      </div>
-    );
-  }
-
-  const filtered = computeFiltered();
-  const ccTotal = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(ccTotal / CC_PAGE_SIZE));
-  if (cc.page > totalPages) cc.page = totalPages;
-  if (cc.page < 1) cc.page = 1;
-  const ccSlice = filtered.slice(
-    (cc.page - 1) * CC_PAGE_SIZE,
-    (cc.page - 1) * CC_PAGE_SIZE + CC_PAGE_SIZE
-  );
-  const ccCurPage = pageOfCurrent();
-
-  const claudePathCur = getSettings().claudePath?.trim() || "";
-  const ccCurLabel = !cc.infoLoaded ? (
-    <>—</>
-  ) : cc.activeVersion ? (
-    <>
-      <span className="v">v{cc.activeVersion}</span>
-      <span className="src">{t("托管路径")}</span>
-    </>
-  ) : claudePathCur ? (
-    cc.detectedVersion ? (
-      <>
-        <span className="v">v{cc.detectedVersion}</span>
-        <span className="src">{t("自定义路径")}</span>
-      </>
-    ) : (
-      <>
-        <span className="v">{claudePathCur}</span>
-        <span className="src">{t("未识别版本")}</span>
-      </>
-    )
-  ) : (
-    <>
-      <span className="v">claude</span>
-      <span className="src">{t("走系统 PATH")}</span>
-    </>
-  );
-
   return (
     <div
       id="settingsScrim"
@@ -1144,28 +719,18 @@ export function SettingsPanel() {
             </button>
             <button
               className={
-                "set-nav-item" + (section === "claude" ? " active" : "")
+                "set-nav-item" + (section === "agent" ? " active" : "")
               }
-              data-section="claude"
+              data-section="agent"
+              data-testid="set-nav-agent"
               type="button"
-              onClick={() => activateSection("claude")}
+              onClick={() => activateSection("agent")}
             >
-              <span className="ic">
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M21 12a9 9 0 1 0-9 9" />
-                  <path d="M12 3v9l6 3" />
-                </svg>
-              </span>
-              Claude Code
+              <span
+                className="ic"
+                dangerouslySetInnerHTML={{ __html: icon("bot", { size: 14 }) }}
+              />
+              {t("智能体")}
             </button>
             <button
               className={
@@ -1305,17 +870,29 @@ export function SettingsPanel() {
                 </div>
               </div>
               <div className="set-row">
-                <label>{t("状态点停留时间")}</label>
+                <label>
+                  {t("查看后清除完成标记")}
+                  <span
+                    className="set-info"
+                    role="img"
+                    tabIndex={0}
+                    aria-label={t("切到已完成的标签页后，过几秒绿点自动消失")}
+                    title={t("切到已完成的标签页后，过几秒绿点自动消失")}
+                    data-testid="set-downgrade-sec-info"
+                    dangerouslySetInnerHTML={{ __html: icon("info", { size: 12 }) }}
+                  />
+                </label>
                 {seg(
                   "set-downgrade-sec",
-                  t("状态点停留时间"),
+                  t("查看后清除完成标记"),
                   form.downgradeSec,
                   (v) => commit({ downgradeSec: v }),
-                  Array.from({ length: 10 }, (_, i) => ({
-                    v: String(i + 1),
-                    label: `${i + 1}s`,
-                  })),
-                  true
+                  [
+                    { v: "1", label: t("立即") },
+                    { v: "3", label: t("3 秒") },
+                    { v: "5", label: t("5 秒") },
+                    { v: "0", label: t("不自动清除") },
+                  ]
                 )}
               </div>
               <div className="set-row set-row-toggle">
@@ -1520,238 +1097,111 @@ export function SettingsPanel() {
 
             <div
               className="set-section"
-              data-section="claude"
-              hidden={section !== "claude"}
+              data-section="agent"
+              hidden={section !== "agent"}
             >
-              <ClaudeAccountSection active={open && section === "claude"} />
-              <div className="set-row set-row-toggle">
-                <label>{t("默认以危险模式启动")}</label>
-                <input
-                  id="set-danger-mode"
-                  type="checkbox"
-                  checked={form.dangerMode}
-                  onChange={(e) => commit({ dangerMode: e.target.checked })}
-                />
-              </div>
-              <div className="set-subhead">{t("版本管理")}</div>
-              <div className="set-row set-row-toggle">
-                <label>{t("禁止 Claude Code 自动升级")}</label>
-                <input
-                  id="set-disable-update"
-                  type="checkbox"
-                  checked={form.disableUpd}
-                  onChange={(e) => commit({ disableUpd: e.target.checked })}
-                />
-              </div>
-              <div className="set-row set-row-toggle">
-                <label>{t("使用 npm 镜像")}</label>
-                <input
-                  id="set-npm-mirror"
-                  type="checkbox"
-                  checked={form.npmMirror}
-                  onChange={(e) => commit({ npmMirror: e.target.checked })}
-                />
-              </div>
-              {/* 开关关闭 = 版本管理走 npm 官方源 */}
-              {form.npmMirror && (
-                <div className="set-row">
-                  <label>{t("npm 镜像")}</label>
+              <div
+                className="seg-group kind-pick agent-tabs"
+                role="tablist"
+                aria-label={t("智能体")}
+              >
+                {AGENT_TABS.map((a) => (
                   <button
+                    key={a.kind}
                     type="button"
-                    className={"picker-select" + (npmOpen ? " open" : "")}
-                    id="set-npm-registry"
-                    ref={npmBtnRef}
-                    onClick={(e) => {
-                      e.stopPropagation(); // 挡掉 document.click 关 ctx 的兜底
-                      openNpmPicker();
-                    }}
+                    role="tab"
+                    aria-selected={agentTab === a.kind}
+                    className={"seg-item" + (agentTab === a.kind ? " active" : "")}
+                    data-testid={`set-agent-tab-${a.kind}`}
+                    onClick={() => setAgentTab(a.kind)}
                   >
-                    <span className="picker-label">
-                      {npmRegLabel(form.npmReg)}
-                    </span>
                     <span
-                      className="picker-chev"
                       dangerouslySetInnerHTML={{
-                        __html: icon("chevron-down", { size: 14 }),
+                        __html: icon(a.kind, { size: 14 }),
                       }}
                     />
+                    {a.label}
                   </button>
-                </div>
-              )}
-
-              <div className="cvcard">
-                <div className="cvcard-l">
-                  <span className="cvcard-body" id="cc-ver-current-label">
-                    {ccCurLabel}
-                  </span>
-                </div>
+                ))}
               </div>
-
-              <div className="cvtool">
-                <div className="cvtool-search">
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <circle cx="11" cy="11" r="7" />
-                    <path d="m20 20-3.5-3.5" />
-                  </svg>
-                  <input
-                    id="cc-ver-search"
-                    type="text"
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder={t("搜索版本号")}
-                    value={cc.search}
-                    onChange={(e) => {
-                      cc.search = e.target.value;
-                      cc.page = 1;
-                      rerender();
-                    }}
-                  />
-                </div>
-                <label className="cvtool-filter">
-                  <input
-                    type="checkbox"
-                    id="cc-ver-only-installed"
-                    checked={cc.onlyInstalled}
-                    onChange={(e) => {
-                      cc.onlyInstalled = e.target.checked;
-                      cc.page = 1;
-                      rerender();
-                    }}
-                  />
-                  <span>{t("仅已安装")}</span>
-                </label>
-                <button
-                  id="cc-ver-refresh"
-                  className={"cvtool-icon" + (cc.refreshing ? " spinning" : "")}
-                  type="button"
-                  title={t("重新拉取版本列表")}
-                  aria-label={t("刷新")}
-                  disabled={cc.refreshing}
-                  onClick={() => void refresh(true)}
+              {AGENT_TABS.map((a) => (
+                <div
+                  key={a.kind}
+                  role="tabpanel"
+                  data-testid={`set-agent-page-${a.kind}`}
+                  hidden={agentTab !== a.kind}
                 >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
+                  {agentAvail[a.kind] ? (
+                    <>
+                      <div className="set-subhead">{t("启动")}</div>
+                      <div className="set-row set-row-toggle">
+                        <label>{t("默认以危险模式启动")}</label>
+                        <input
+                          type="checkbox"
+                          aria-label={t("默认以危险模式启动")}
+                          data-testid={`set-${a.kind}-danger-mode`}
+                          checked={a.kind === "codex" ? form.codexDangerMode : form.dangerMode}
+                          onChange={(e) =>
+                            commit(
+                              a.kind === "codex"
+                                ? { codexDangerMode: e.target.checked }
+                                : { dangerMode: e.target.checked }
+                            )
+                          }
+                        />
+                      </div>
+                    </>
+                  ) : null}
+                  <div className="set-subhead">{t("版本")}</div>
+                  <AgentVersions
+                    agent={a.kind}
+                    active={open && section === "agent" && agentTab === a.kind}
+                    found={agentAvail[a.kind]}
+                    onChanged={() => void refreshAgentAvail()}
                   >
-                    <path d="M23 4v6h-6" />
-                    <path d="M1 20v-6h6" />
-                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
-                    <path d="M20.49 15A9 9 0 0 1 5.64 18.36L1 14" />
-                  </svg>
-                </button>
-              </div>
-
-              <div className="cvlist" id="cc-ver-list" role="listbox">
-                {ccTotal === 0 ? (
-                  <div className="cvempty">
-                    {cc.loaded ? t("没有匹配的版本") : null}
-                  </div>
-                ) : (
-                  ccSlice.map((v) => ccRow(v))
-                )}
-              </div>
-              <div className="cvpager" id="cc-ver-pager" hidden={ccTotal === 0}>
-                {ccTotal > 0 ? (
-                  <>
-                    <button
-                      type="button"
-                      className="cvpager-arrow"
-                      title={t("上一页")}
-                      disabled={cc.page <= 1}
-                      onClick={() => {
-                        cc.page--;
-                        rerender();
-                      }}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="m15 6-6 6 6 6" />
-                      </svg>
-                    </button>
-                    <span
-                      className="cvpager-status"
-                      dangerouslySetInnerHTML={{
-                        __html: t(
-                          '第 <span class="cur">{0}</span> / {1} 页',
-                          cc.page,
-                          totalPages
-                        ),
-                      }}
-                    />
-                    <span className="cvpager-spacer" />
-                    {/* 使用中版本不在本页时展示跳转 chip */}
-                    {ccCurPage > 0 && ccCurPage !== cc.page ? (
+                    <div className="set-row set-row-toggle">
+                      <label>{t("禁止自动升级")}</label>
+                      <input
+                        type="checkbox"
+                        aria-label={t("禁止自动升级")}
+                        data-testid={`set-${a.kind}-disable-update`}
+                        checked={a.kind === "codex" ? form.codexDisableUpd : form.disableUpd}
+                        onChange={(e) =>
+                          commit(
+                            a.kind === "codex"
+                              ? { codexDisableUpd: e.target.checked }
+                              : { disableUpd: e.target.checked }
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="set-row">
+                      <label>{t("下载源")}</label>
                       <button
                         type="button"
-                        className="cvpager-jump"
-                        title={t("跳到第 {0} 页", ccCurPage)}
-                        onClick={() => {
-                          cc.page = ccCurPage;
-                          rerender();
+                        className={"picker-select" + (npmOpen ? " open" : "")}
+                        aria-label={t("下载源")}
+                        data-testid={`set-${a.kind}-npm-registry`}
+                        onClick={(e) => {
+                          e.stopPropagation(); // 挡掉 document.click 关 ctx 的兜底
+                          npmBtnRef.current = e.currentTarget;
+                          openNpmPicker();
                         }}
                       >
-                        {t("当前使用版本")}
+                        <span className="picker-label">
+                          {npmRegLabel(form.npmReg)}
+                        </span>
+                        <span
+                          className="picker-chev"
+                          dangerouslySetInnerHTML={{
+                            __html: icon("chevron-down", { size: 14 }),
+                          }}
+                        />
                       </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="cvpager-arrow"
-                      title={t("下一页")}
-                      disabled={cc.page >= totalPages}
-                      onClick={() => {
-                        cc.page++;
-                        rerender();
-                      }}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="m9 6 6 6-6 6" />
-                      </svg>
-                    </button>
-                  </>
-                ) : null}
-              </div>
-              <div
-                className={
-                  "cc-ver-hint" + (cc.hintKind ? " " + cc.hintKind : "")
-                }
-                id="cc-ver-hint"
-              >
-                {cc.hintText}
-              </div>
+                    </div>
+                  </AgentVersions>
+                </div>
+              ))}
             </div>
 
             <div

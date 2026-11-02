@@ -1,20 +1,11 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type {
-  ClaudeAccountDetail,
-  ClaudeAccountResult,
-  ClaudeAccountsSnapshot,
-  SaveClaudeAccountInput
-} from '../shared/claude-accounts'
 import type { UpdateActionResult, UpdateCheckResult, UpdateEvent } from '../shared/update'
-import type { SessionSource, StoreOp, StoreSnapshot } from '../shared/store-types'
+import type { AgentKind, SessionSource, StoreOp, StoreSnapshot } from '../shared/store-types'
 import type { ForegroundInfo } from '../shared/foreground'
 
 export type {
+  AgentKind,
   ForegroundInfo,
-  ClaudeAccountDetail,
-  ClaudeAccountResult,
-  ClaudeAccountsSnapshot,
-  SaveClaudeAccountInput,
   UpdateActionResult,
   UpdateCheckResult,
   UpdateEvent,
@@ -70,9 +61,11 @@ export interface Settings {
   defaults: { cwd: string }
   dangerousSkipPermissions: boolean
   claudePath: string
-  npmRegistry: string
-  npmMirrorEnabled: boolean
   disableAutoupdater: boolean
+  codexDangerousSkipPermissions: boolean
+  codexPath: string
+  codexDisableAutoupdater: boolean
+  npmRegistry: string
   lastUsedCwd: string
   sidebarWidth: number
   sidebarCollapsed: boolean
@@ -105,19 +98,19 @@ export interface SessionMeta {
   exists: boolean
 }
 
-export interface InstalledCcVersion {
+export interface InstalledAgentVersion {
   version: string
   path: string
   installedAt: number
   active: boolean
 }
-export interface CcInstallResult {
+export interface AgentInstallResult {
   ok: boolean
   version: string
   path?: string
   error?: string
 }
-export interface CcRemoteResult {
+export interface AgentRemoteResult {
   ok: boolean
   versions: string[]
   error?: string
@@ -135,27 +128,21 @@ export interface TermBridge {
   storeLoad(): Promise<StoreSnapshot>
   storeOp(o: StoreOp): Promise<StoreSnapshot>
   onStoreChanged(cb: (s: StoreSnapshot) => void): () => void
-  claudeAvailable(): Promise<boolean>
+  // 设置里选定的可执行文件存在，或 PATH 上有
+  agentAvailable(agent: AgentKind): Promise<boolean>
   claudeSessionExists(sessionId: string): Promise<boolean>
-  codexAvailable(): Promise<boolean>
   codexSessionExists(sessionId: string): Promise<boolean>
   claudeSessionMeta(sessionId: string): Promise<SessionMeta>
-  claudeDetect(): Promise<string | null>
   appVersion(): Promise<string>
   // npm 镜像测速：返回响应头到达耗时 ms；超时/连不上返回 -1
   npmPing(url: string): Promise<number>
-  ccListInstalled(): Promise<InstalledCcVersion[]>
-  ccListRemote(): Promise<CcRemoteResult>
-  ccInstall(version: string): Promise<CcInstallResult>
-  ccInstallCancel(version: string): Promise<{ ok: boolean; error?: string }>
-  ccUninstall(version: string): Promise<{ ok: boolean; error?: string }>
-  ccCurrentVersion(): Promise<string | null>
-  onCcInstallPhase(cb: (p: { version: string; phase: string }) => void): () => void
-  claudeAccountsLoad(): Promise<ClaudeAccountResult<ClaudeAccountsSnapshot>>
-  claudeAccountGet(id: string | null): Promise<ClaudeAccountResult<ClaudeAccountDetail>>
-  claudeAccountSave(input: SaveClaudeAccountInput): Promise<ClaudeAccountResult<ClaudeAccountsSnapshot>>
-  claudeAccountActivate(id: string): Promise<ClaudeAccountResult<ClaudeAccountsSnapshot>>
-  claudeAccountDelete(id: string): Promise<ClaudeAccountResult<ClaudeAccountsSnapshot>>
+  verListInstalled(agent: AgentKind): Promise<InstalledAgentVersion[]>
+  verListRemote(agent: AgentKind): Promise<AgentRemoteResult>
+  verInstall(agent: AgentKind, version: string): Promise<AgentInstallResult>
+  verInstallCancel(agent: AgentKind, version: string): Promise<{ ok: boolean; error?: string }>
+  verUninstall(agent: AgentKind, version: string): Promise<{ ok: boolean; error?: string }>
+  verCurrent(agent: AgentKind): Promise<string | null>
+  onVerInstallPhase(cb: (p: { agent: AgentKind; version: string; phase: string }) => void): () => void
   hookPaths(): Promise<HookPaths>
   pickDirectory(defaultPath?: string): Promise<string | null>
   pathExists(p: string): Promise<boolean>
@@ -221,30 +208,23 @@ const api: TermBridge = {
     ipcRenderer.on('store:changed', h)
     return () => ipcRenderer.off('store:changed', h)
   },
-  claudeAvailable: () => ipcRenderer.invoke('claude:available'),
+  agentAvailable: (agent) => ipcRenderer.invoke('agent:available', agent),
   claudeSessionExists: (sessionId) => ipcRenderer.invoke('claude:sessionExists', sessionId),
-  codexAvailable: () => ipcRenderer.invoke('codex:available'),
   codexSessionExists: (sessionId) => ipcRenderer.invoke('codex:sessionExists', sessionId),
   claudeSessionMeta: (sessionId) => ipcRenderer.invoke('claude:sessionMeta', sessionId),
-  claudeDetect: () => ipcRenderer.invoke('claude:detect'),
   appVersion: () => ipcRenderer.invoke('app:version'),
   npmPing: (url) => ipcRenderer.invoke('npm:ping', url),
-  ccListInstalled: () => ipcRenderer.invoke('cc:listInstalled'),
-  ccListRemote: () => ipcRenderer.invoke('cc:listRemote'),
-  ccInstall: (version) => ipcRenderer.invoke('cc:install', version),
-  ccInstallCancel: (version) => ipcRenderer.invoke('cc:installCancel', version),
-  ccUninstall: (version) => ipcRenderer.invoke('cc:uninstall', version),
-  ccCurrentVersion: () => ipcRenderer.invoke('cc:currentVersion'),
-  onCcInstallPhase: (cb) => {
-    const h = (_e: IpcRendererEvent, p: { version: string; phase: string }): void => cb(p)
-    ipcRenderer.on('cc:install:phase', h)
-    return () => ipcRenderer.off('cc:install:phase', h)
+  verListInstalled: (agent) => ipcRenderer.invoke('ver:listInstalled', agent),
+  verListRemote: (agent) => ipcRenderer.invoke('ver:listRemote', agent),
+  verInstall: (agent, version) => ipcRenderer.invoke('ver:install', agent, version),
+  verInstallCancel: (agent, version) => ipcRenderer.invoke('ver:installCancel', agent, version),
+  verUninstall: (agent, version) => ipcRenderer.invoke('ver:uninstall', agent, version),
+  verCurrent: (agent) => ipcRenderer.invoke('ver:current', agent),
+  onVerInstallPhase: (cb) => {
+    const h = (_e: IpcRendererEvent, p: { agent: AgentKind; version: string; phase: string }): void => cb(p)
+    ipcRenderer.on('ver:install:phase', h)
+    return () => ipcRenderer.off('ver:install:phase', h)
   },
-  claudeAccountsLoad: () => ipcRenderer.invoke('claude-accounts:load'),
-  claudeAccountGet: (id) => ipcRenderer.invoke('claude-accounts:get', id),
-  claudeAccountSave: (input) => ipcRenderer.invoke('claude-accounts:save', input),
-  claudeAccountActivate: (id) => ipcRenderer.invoke('claude-accounts:activate', id),
-  claudeAccountDelete: (id) => ipcRenderer.invoke('claude-accounts:delete', id),
   hookPaths: () => ipcRenderer.invoke('hooks:paths'),
   pickDirectory: (defaultPath) => ipcRenderer.invoke('dialog:pickDirectory', defaultPath),
   pathExists: (p) => ipcRenderer.invoke('path:exists', p),

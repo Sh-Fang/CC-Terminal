@@ -29,6 +29,7 @@ export type IconName =
   | 'arrow-left-right'
   | 'chevron-right'
   | 'bot'
+  | 'info'
   | 'terminal'
   | 'square-terminal'
   | 'claude'
@@ -88,6 +89,7 @@ const PATHS: Record<IconName, string> = {
   'eye-off': '<path d="m3 3 18 18"/><path d="M10.6 5.2A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a16.4 16.4 0 0 1-3 4.1M6.6 6.6C3.6 8.6 2 12 2 12s3.5 7 10 7c1.7 0 3.1-.5 4.4-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   'arrow-left-right': '<path d="m8 3-5 5 5 5"/><path d="M3 8h18"/><path d="m16 21 5-5-5-5"/><path d="M21 16H3"/>',
   'chevron-right': '<path d="m9 18 6-6-6-6"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
   bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/>',
   terminal: '<path d="M12 19h8"/><path d="m4 17 6-6-6-6"/>',
   'map-pin': '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',

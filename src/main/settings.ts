@@ -31,13 +31,16 @@ export interface Settings {
   // true = 每次启动 cc（新建会话与 --resume 都算）都带 --dangerously-skip-permissions
   dangerousSkipPermissions: boolean
   claudePath: string  // 留空 = 直接调 'claude'；填 = 用这个绝对路径（多版本切换写这里）
-  npmRegistry: string  // 安装 cc 版本用的 npm 镜像，空 = 走默认国内镜像
-  npmMirrorEnabled: boolean  // false = 不用镜像，cc 版本管理走 npm 官方源
   disableAutoupdater: boolean  // true = spawn pwsh 时注入 DISABLE_AUTOUPDATER=1
+  // true = 每次启动 codex 都带 --dangerously-bypass-approvals-and-sandbox
+  codexDangerousSkipPermissions: boolean
+  codexPath: string  // 留空 = 直接调 'codex'；填 = 用这个绝对路径
+  codexDisableAutoupdater: boolean  // true = 启动 codex 时关掉启动检查更新
+  npmRegistry: string  // 安装智能体版本用的 npm 源
   lastUsedCwd: string  // 最近一次新建分组选择的 cwd，下次预填用
   sidebarWidth: number
   sidebarCollapsed: boolean
-  statusDowngradeSec: number   // done/attention 停留多少秒后降回 idle（1~10）
+  statusDowngradeSec: number   // 查看已完成的标签页多少秒后清掉绿点：1 / 3 / 5；0 = 不自动清除
   closeBehavior: CloseBehavior // 点关闭按钮：quit = 二次确认后退出（默认）；tray = 不确认，收进托盘
   showFloater: boolean         // 开启常驻悬浮窗（显示待查看 / 待决策 / 运行中 数）
   floaterX: number | null      // 悬浮窗最近一次屏幕位置（null = 未持久化，走默认位）
@@ -61,9 +64,11 @@ export const DEFAULT_SETTINGS: Settings = {
   defaults: { cwd: '' },
   dangerousSkipPermissions: false,
   claudePath: '',
-  npmRegistry: 'https://registry.npmmirror.com',
-  npmMirrorEnabled: true,
   disableAutoupdater: true,
+  codexDangerousSkipPermissions: false,
+  codexPath: '',
+  codexDisableAutoupdater: true,
+  npmRegistry: 'https://registry.npmmirror.com',
   lastUsedCwd: '',
   sidebarWidth: 268,
   sidebarCollapsed: false,
@@ -85,12 +90,22 @@ const CURSORS: CursorStyle[] = ['block', 'underline', 'bar']
 const CLOSE_BEHAVIORS: CloseBehavior[] = ['quit', 'tray']
 const TABBAR_MODES: TabBarMode[] = ['vertical', 'horizontal']
 const LANGUAGES: AppLanguage[] = ['zh', 'en']
+const NPM_OFFICIAL_REGISTRY = 'https://registry.npmjs.org'
 
 function pick<T extends string>(v: unknown, allow: T[], fallback: T): T {
   return typeof v === 'string' && (allow as string[]).includes(v) ? (v as T) : fallback
 }
 function bool(v: unknown, fallback: boolean): boolean {
   return typeof v === 'boolean' ? v : fallback
+}
+// 清除完成标记只有 1 / 3 / 5 秒和 0（不自动清除）四档；旧版 1~10 的任意值就近归档
+function downgradeSec(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v)
+  if (!Number.isFinite(n)) return DEFAULT_SETTINGS.statusDowngradeSec
+  if (n <= 0) return 0
+  if (n <= 2) return 1
+  if (n <= 4) return 3
+  return 5
 }
 function clampNum(v: unknown, min: number, max: number, fallback: number): number {
   const n = typeof v === 'number' ? v : Number(v)
@@ -148,22 +163,28 @@ function normalize(raw: unknown): Settings {
         ? r.dangerousSkipPermissions
         : DEFAULT_SETTINGS.dangerousSkipPermissions,
     claudePath: typeof r.claudePath === 'string' ? r.claudePath : DEFAULT_SETTINGS.claudePath,
-    npmRegistry:
-      typeof r.npmRegistry === 'string' && r.npmRegistry.trim()
-        ? r.npmRegistry.trim()
-        : DEFAULT_SETTINGS.npmRegistry,
-    npmMirrorEnabled:
-      typeof r.npmMirrorEnabled === 'boolean'
-        ? r.npmMirrorEnabled
-        : DEFAULT_SETTINGS.npmMirrorEnabled,
     disableAutoupdater:
       typeof r.disableAutoupdater === 'boolean'
         ? r.disableAutoupdater
         : DEFAULT_SETTINGS.disableAutoupdater,
+    // 拆分前 Claude、Codex 共用 dangerousSkipPermissions，没有独立值时沿用它
+    codexDangerousSkipPermissions: bool(
+      r.codexDangerousSkipPermissions,
+      bool(r.dangerousSkipPermissions, DEFAULT_SETTINGS.codexDangerousSkipPermissions)
+    ),
+    codexPath: typeof r.codexPath === 'string' ? r.codexPath : DEFAULT_SETTINGS.codexPath,
+    codexDisableAutoupdater: bool(r.codexDisableAutoupdater, DEFAULT_SETTINGS.codexDisableAutoupdater),
+    // 旧版「不用镜像」开关并入下载源：关着的等同选了 npm 官方源
+    npmRegistry:
+      r.npmMirrorEnabled === false
+        ? NPM_OFFICIAL_REGISTRY
+        : typeof r.npmRegistry === 'string' && r.npmRegistry.trim()
+        ? r.npmRegistry.trim()
+        : DEFAULT_SETTINGS.npmRegistry,
     lastUsedCwd: typeof r.lastUsedCwd === 'string' ? r.lastUsedCwd : DEFAULT_SETTINGS.lastUsedCwd,
     sidebarWidth: clampNum(r.sidebarWidth, 180, 520, DEFAULT_SETTINGS.sidebarWidth),
     sidebarCollapsed: typeof r.sidebarCollapsed === 'boolean' ? r.sidebarCollapsed : DEFAULT_SETTINGS.sidebarCollapsed,
-    statusDowngradeSec: clampNum(r.statusDowngradeSec, 1, 10, DEFAULT_SETTINGS.statusDowngradeSec),
+    statusDowngradeSec: downgradeSec(r.statusDowngradeSec),
     closeBehavior: pick(r.closeBehavior, CLOSE_BEHAVIORS, DEFAULT_SETTINGS.closeBehavior),
     showFloater:
       typeof r.showFloater === 'boolean' ? r.showFloater : DEFAULT_SETTINGS.showFloater,

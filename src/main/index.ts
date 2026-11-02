@@ -9,7 +9,7 @@ import { StateEventWatcher } from './state-events'
 import { isSafeExternalUrl } from './url-safety'
 import { setFloaterEnabled, destroyFloater } from './floater'
 import { loadSettings, saveSettings } from './settings'
-import { detectClaudePath } from './claude-helper'
+import { detectAgentPath } from './claude-helper'
 import { logEvent, startLogging, stopLogging } from './app-log'
 import { setLanguage, t } from './i18n'
 import { setMainWindowGetter } from './windows'
@@ -382,14 +382,21 @@ app.whenReady().then(() => {
   try {
     if (loadSettings().showFloater) setFloaterEnabled(true)
   } catch {}
-  // claudePath 为空 → 自动检测一次并持久化绝对路径；找不到保持空（走 PATH）
+  // claudePath / codexPath 为空 → 自动检测一次并持久化绝对路径；找不到保持空（走 PATH）
   try {
     const s = loadSettings()
     if (!s.claudePath.trim()) {
-      const detected = detectClaudePath()
+      const detected = detectAgentPath('claude')
       if (detected) {
-        saveSettings({ ...s, claudePath: detected })
+        saveSettings({ ...loadSettings(), claudePath: detected })
         logEvent('claude_path_autodetected', { path: detected })
+      }
+    }
+    if (!s.codexPath.trim()) {
+      const detected = detectAgentPath('codex')
+      if (detected) {
+        saveSettings({ ...loadSettings(), codexPath: detected })
+        logEvent('codex_path_autodetected', { path: detected })
       }
     }
   } catch {}

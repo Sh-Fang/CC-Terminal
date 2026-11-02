@@ -245,7 +245,7 @@ export function Sidebar() {
         }}
         onContextMenu={(e) => {
           e.preventDefault()
-          openTabCtx(tab.id, e.clientX, e.clientY)
+          void openTabCtx(tab.id, e.clientX, e.clientY)
         }}
         onDoubleClick={() => {
           if (renamingTab !== tab.id) startRename(tab.id, tab.name)

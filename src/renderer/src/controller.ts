@@ -471,7 +471,7 @@ async function launchCC(tab: TerminalTab, shell?: ForegroundProgram, pick?: Agen
     }
   }
   const cmd = agent === 'codex'
-    ? await codexCommand(tab, resumeId)
+    ? await codexCommand(tab, shell, resumeId)
     : await claudeCommand(tab, shell, resumeId)
   if (cmd == null || tab.ptyId == null || launchAborted.delete(tab.id)) {
     ccGateRelease(tab.id)
@@ -483,44 +483,54 @@ async function launchCC(tab: TerminalTab, shell?: ForegroundProgram, pick?: Agen
   window.term.send(tab.ptyId, clearScreenPrefix(shell) + cmd + '\r')
 }
 
+// 智能体可执行文件的调用前缀：设置里选了路径就用它，否则直接调命令名；找不到时在终端里提示并返回 null
+async function agentInvocation(tab: TerminalTab, agent: AgentKind, shell: ForegroundProgram | undefined): Promise<string | null> {
+  const bin = (agent === 'codex' ? settings.codexPath : settings.claudePath).trim()
+  if (bin) {
+    if (!(await window.term.pathExists(bin))) {
+      tab.term.writeln(`\x1b[33m${t('[{0} 路径不存在：{1}，跳过自动启动]', agent, bin)}\x1b[0m`)
+      tab.term.writeln(`\x1b[90m${t('请到设置 → 智能体 中重新选择版本。')}\x1b[0m`)
+      return null
+    }
+    // pwsh 里引号包住的绝对路径要加 & 调用操作符才执行；cmd 和 POSIX 不用
+    const invoker = IS_WIN_PLATFORM && shell !== 'cmd' ? '& ' : ''
+    return invoker + quoteShell(bin, shell)
+  }
+  if (!(await window.term.agentAvailable(agent))) {
+    tab.term.writeln(`\x1b[90m${t('[{0} 未在 PATH 中，跳过自动启动]', agent)}\x1b[0m`)
+    return null
+  }
+  return agent
+}
+
 // 拼 claude 启动命令；claude 不可用时在终端里提示并返回 null
 async function claudeCommand(tab: TerminalTab, shell: ForegroundProgram | undefined, resumeId: string | null): Promise<string | null> {
-  const claudeBin = settings.claudePath.trim()
-  if (claudeBin) {
-    if (!(await window.term.pathExists(claudeBin))) {
-      tab.term.writeln(`\x1b[33m${t('[claude 路径不存在：{0}，跳过自动启动]', claudeBin)}\x1b[0m`)
-      tab.term.writeln(`\x1b[90m${t('请到设置 → Claude Code 中重新选择 claude 可执行文件。')}\x1b[0m`)
-      return null
-    }
-  } else {
-    const available = await window.term.claudeAvailable()
-    if (!available) {
-      tab.term.writeln(`\x1b[90m${t('[claude 未在 PATH 中，跳过自动启动 Claude Code]')}\x1b[0m`)
-      return null
-    }
-  }
-  const claudeCmd = claudeBin ? quoteShell(claudeBin, shell) : 'claude'
-  // pwsh 里引号包住的绝对路径要加 & 调用操作符才执行；cmd 和 POSIX 不用
-  const invoker = claudeBin && IS_WIN_PLATFORM && shell !== 'cmd' ? '& ' : ''
-
+  const claudeCmd = await agentInvocation(tab, 'claude', shell)
+  if (claudeCmd == null) return null
   const settingsArg = await hookSettingsArg(shell)
   // 每次起 cc 都现读设置：改完开关再「重新加载标签」，新进程就按新模式起（不必重开 app）
   const dangerArg = settings.dangerousSkipPermissions ? ' --dangerously-skip-permissions' : ''
   if (resumeId) {
-    return `${invoker}${claudeCmd} --resume ${resumeId}${dangerArg}${settingsArg}`
+    return `${claudeCmd} --resume ${resumeId}${dangerArg}${settingsArg}`
   }
-  return `${invoker}${claudeCmd} --session-id ${crypto.randomUUID()}${dangerArg}${settingsArg}`
+  return `${claudeCmd} --session-id ${crypto.randomUUID()}${dangerArg}${settingsArg}`
 }
 
 // 拼 codex 启动命令：-p 叠加 app 写好的 hooks profile；会话 id 由 codex 自己生成，经 SessionStart hook 上报
-async function codexCommand(tab: TerminalTab, resumeId: string | null): Promise<string | null> {
-  if (!(await window.term.codexAvailable())) {
-    tab.term.writeln(`\x1b[90m${t('[codex 未在 PATH 中，跳过启动 Codex]')}\x1b[0m`)
-    return null
-  }
-  const dangerArg = settings.dangerousSkipPermissions ? ' --dangerously-bypass-approvals-and-sandbox' : ''
+async function codexCommand(tab: TerminalTab, shell: ForegroundProgram | undefined, resumeId: string | null): Promise<string | null> {
+  const codexCmd = await agentInvocation(tab, 'codex', shell)
+  if (codexCmd == null) return null
+  const dangerArg = settings.codexDangerousSkipPermissions ? ' --dangerously-bypass-approvals-and-sandbox' : ''
+  const updateArg = settings.codexDisableAutoupdater ? ' -c check_for_update_on_startup=false' : ''
   const sub = resumeId ? ` resume ${resumeId}` : ''
-  return `codex${sub} -p cc-terminal --dangerously-bypass-hook-trust${dangerArg}`
+  return `${codexCmd}${sub} -p cc-terminal --dangerously-bypass-hook-trust${updateArg}${dangerArg}`
+}
+
+// 找得到的智能体，按固定顺序
+export async function availableAgents(): Promise<AgentKind[]> {
+  const all: AgentKind[] = ['claude', 'codex']
+  const ok = await Promise.all(all.map((a) => window.term.agentAvailable(a)))
+  return all.filter((_, i) => ok[i])
 }
 
 // 右键「启动智能体」：标签页转为智能体标签页，在当前 shell 里起选中的智能体（主会话属于它就续上）
@@ -706,6 +716,11 @@ function rememberCwd(cwd: string): void {
   }
 }
 
+// 新建标签页可选的类型：终端加上找得到的智能体
+async function newTabKinds(): Promise<NewTabKind[]> {
+  return ['terminal', ...(await availableAgents())]
+}
+
 async function openNewTab(tab: TerminalTab | null): Promise<void> {
   if (!tab) return
   activeTabId = tab.id
@@ -722,7 +737,7 @@ export async function newGroup(): Promise<void> {
     sub: '',
     name: t('新分组'),
     cwd: prefilledCwd,
-    showKind: true,
+    kinds: await newTabKinds(),
     showTabName: true,
     tabName: 'A',
     okLabel: t('创建'),
@@ -773,7 +788,7 @@ export async function promptNewTabInGroup(groupId: string): Promise<void> {
     sub: '',
     name: nm,
     cwd: undefined,
-    showKind: true,
+    kinds: await newTabKinds(),
     okLabel: t('创建'),
     onOk: async (v) => {
       await openNewTab(await createTab(groupId, v.name, v.kind ?? 'terminal'))
@@ -786,7 +801,7 @@ function activateUI(tabId: string): void {
   refreshUI()
 }
 
-// 查看降级：切到 done 标签且主窗口有焦点，停留 N 秒后降回 idle；失焦暂停、回焦重新计满 N 秒。
+// 查看降级：切到 done 标签且主窗口有焦点，停留 N 秒后降回 idle；失焦暂停、回焦重新计满 N 秒；N = 0 不自动降级。
 // attention 不参与降级：只能由 cc 发新状态或手动"标记为已查看"清除。
 let downgradeTimer: number | null = null
 let downgradeTabId: string | null = null
@@ -825,6 +840,7 @@ function clearDowngradeTimer(): void {
 function maybeStartDowngrade(tabId: string, st: TerminalTab['status']): void {
   if (activeTabId !== tabId) return
   if (st !== 'done') return
+  if (settings.statusDowngradeSec <= 0) return
   // 主窗口失焦时不启动倒计时；focus 事件回来时 resumeDowngradeIfNeeded 会再调一次
   if (!document.hasFocus()) return
   clearDowngradeTimer()
@@ -1233,7 +1249,11 @@ export function markTabViewed(tabId: string): void {
   refreshUI()
 }
 
-export function openTabCtx(tabId: string, x: number, y: number): void {
+export async function openTabCtx(tabId: string, x: number, y: number): Promise<void> {
+  const found = findTab(tabId)
+  if (!found) return
+  // 前台程序是 shell 本身（底下没有子程序）才能启动智能体；只列找得到的
+  const agents = !isChildId(tabId) && foregroundOf(found.tab).atPrompt ? await availableAgents() : []
   const ctx = findTab(tabId)
   if (!ctx) return
   // idle → 可标"待查看"；done/attention/error → 可标"已查看"；busy 都不给
@@ -1247,16 +1267,16 @@ export function openTabCtx(tabId: string, x: number, y: number): void {
   if (items.length > 0) {
     items.push({ sep: true })
   }
-  // 前台程序是 shell 本身（底下没有子程序）才能启动智能体
-  if (!isChildId(tabId) && foregroundOf(ctx.tab).atPrompt) {
+  if (agents.length > 0) {
     items.push(
       {
         label: t('启动智能体'),
         icon: icon('bot'),
-        children: [
-          { label: 'Claude Code', icon: icon('claude'), act: () => void launchAgentInTab(tabId, 'claude') },
-          { label: 'Codex', icon: icon('codex'), act: () => void launchAgentInTab(tabId, 'codex') }
-        ]
+        children: agents.map((a) => ({
+          label: a === 'codex' ? 'Codex' : 'Claude Code',
+          icon: icon(a),
+          act: () => void launchAgentInTab(tabId, a)
+        }))
       },
       { sep: true }
     )
