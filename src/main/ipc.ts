@@ -4,6 +4,7 @@ import { request as httpsRequest } from 'node:https'
 import { request as httpRequest } from 'node:http'
 import { createPty, killPty, killPtyAndWait, resizePty, shellPids, writePty } from './pty-manager'
 import { currentForeground, pokeForeground, startForegroundWatch } from './foreground'
+import { sampleUsage } from './resource-usage'
 import { applyOp, setStoreChangeListener, snapshot, type StoreOp } from './store'
 import { agentPathSetting, isAgentAvailable, sessionExists } from './claude-helper'
 import { codexSessionExists } from './codex-helper'
@@ -290,6 +291,7 @@ export function registerPtyIpc(
 
   startForegroundWatch(shellPids, (id, info) => sendToMain('pty:foreground', { id, ...info }))
   ipcMain.handle('pty:foreground', () => currentForeground())
+  ipcMain.handle('usage:sample', () => sampleUsage(shellPids()))
 
   ipcMain.handle('hooks:paths', () => getHookPaths())
 

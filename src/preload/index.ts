@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { UpdateActionResult, UpdateCheckResult, UpdateEvent } from '../shared/update'
 import type { AgentKind, SessionSource, StoreOp, StoreSnapshot } from '../shared/store-types'
 import type { ForegroundInfo } from '../shared/foreground'
+import type { UsageSample } from '../shared/usage'
 
 export type {
   AgentKind,
@@ -171,6 +172,7 @@ export interface TermBridge {
   // 前台程序变化：按 ptyId 推送
   onForeground(cb: (id: number, info: ForegroundInfo) => void): () => void
   foregroundAll(): Promise<Record<number, ForegroundInfo>>
+  usageSample(): Promise<UsageSample>
   onSessionEvent(cb: (e: SessionEvent) => void): () => void
   onStateEvent(cb: (e: StateEvent) => void): () => void
   // 悬浮窗
@@ -277,6 +279,7 @@ const api: TermBridge = {
     return () => ipcRenderer.off('pty:foreground', h)
   },
   foregroundAll: () => ipcRenderer.invoke('pty:foreground'),
+  usageSample: () => ipcRenderer.invoke('usage:sample'),
   onSessionEvent: (cb) => {
     const h = (_e: IpcRendererEvent, p: SessionEvent) => cb(p)
     ipcRenderer.on('session:event', h)

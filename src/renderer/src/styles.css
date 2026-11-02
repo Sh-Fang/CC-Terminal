@@ -854,6 +854,55 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 .xterm-viewport::-webkit-scrollbar { width: 8px; }
 .xterm-viewport::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 4px; }
 
+/* 资源占用：状态栏右端 */
+.res-bar {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: flex; align-items: center; gap: 12px;
+  margin-left: auto;
+  padding: 0 8px;
+  border-left: 1px solid var(--hairline);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.res-bar:hover, .res-bar.open { color: var(--ink); background: var(--hairline); }
+.res-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.res-ic { display: grid; place-items: center; }
+.res-panel {
+  position: fixed; z-index: 90;
+  width: 340px;
+  max-height: min(420px, calc(100vh - 80px));
+  display: flex; flex-direction: column;
+  background: var(--canvas);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-5);
+  padding: 5px;
+  font-family: var(--sans); font-size: 12px;
+  color: var(--body);
+  cursor: default;
+  animation: pop 0.12s ease;
+}
+.res-row {
+  display: grid;
+  grid-template-columns: 1fr 52px 68px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+}
+.res-num { text-align: right; font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+.res-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.res-head { color: var(--mute); font-size: 11px; padding-top: 2px; padding-bottom: 2px; }
+.res-head .res-num { font-family: inherit; }
+.res-app, .res-total { font-weight: 600; color: var(--ink); }
+.res-total { border-top: 1px solid var(--hairline); border-radius: 0; margin-top: 2px; }
+.res-list { overflow-y: auto; min-height: 0; }
+.res-list::-webkit-scrollbar { width: 0; }
+.res-tab { cursor: pointer; }
+.res-tab:hover { background: var(--hairline); }
+.res-group { color: var(--mute); flex: 0 1 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-tabname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Statusbar */
 .statusbar {
   flex: 0 0 26px;
@@ -870,10 +919,8 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 0 1 auto;
-  margin-left: auto;          /* 推到状态栏右端 */
-  padding-left: 16px;
-  border-left: 1px solid var(--hairline);
-  max-width: 60%;              /* 太长的路径截断，给左边留位置 */
+  min-width: 0;
+  padding-right: 16px;
   user-select: text;          /* 路径可手动选中复制（覆盖外层的 user-select: none）*/
   cursor: text;
 }

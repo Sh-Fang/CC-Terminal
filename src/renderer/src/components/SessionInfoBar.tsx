@@ -2,12 +2,13 @@ import { useAppStore } from '../state/store'
 import { toast } from '../state/overlays'
 import { getSessionInfoCtx } from '../controller'
 import { t } from '../i18n'
+import { ResourceBar } from './ResourceBar'
 
 export function SessionInfoBar() {
   const rev = useAppStore((s) => s.rev)
   void rev
 
-  // 底部路径：跟随当前激活分组的 cwd（rev 驱动）
+  // 底部左侧路径：跟随当前激活分组的 cwd（rev 驱动）
   const cwd = getSessionInfoCtx()?.cwd ?? ''
 
   return (
@@ -31,6 +32,7 @@ export function SessionInfoBar() {
       >
         {cwd}
       </span>
+      <ResourceBar />
     </div>
   )
 }

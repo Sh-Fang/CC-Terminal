@@ -9,7 +9,7 @@ const IS_WIN = process.platform === 'win32'
 const POLL_MS = 1500
 const DEBOUNCE_MS = 300
 
-interface Proc {
+export interface Proc {
   pid: number
   ppid: number
   name: string
@@ -126,6 +126,11 @@ function loadWinApi(): WinApi {
     }
   }
   return winApi
+}
+
+// 全部进程（pid / 父 pid / exe 名），资源占用统计也用
+export function listWinProcs(): Proc[] {
+  return loadWinApi().list()
 }
 
 // 交互式 shell：pwsh 不带 -c/-File、cmd 不带 /c；带了的是一次性包装（如 npm 的 claude.cmd），往下穿透
