@@ -1,4 +1,4 @@
-// 资源占用：状态栏右端显示应用自身的 CPU、内存，点开浮层看各标签页与合计
+// 资源占用：状态栏右端显示合计的 CPU、内存，点开浮层看应用自身与各标签页
 import { useEffect, useRef, useState } from 'react'
 import type { Usage, UsageSample } from '../../../shared/usage'
 import { useAppStore } from '../state/store'
@@ -129,7 +129,8 @@ export function ResourceBar() {
       }
     }
   }
-  const total = rows.reduce(
+  // 状态栏和浮层底部都显示合计：应用自身加所有正在运行的标签页
+  const total = (sample ? runningRows(sample) : []).reduce(
     (acc, r) => ({ cpu: acc.cpu + r.usage.cpu, mem: acc.mem + r.usage.mem }),
     sample ? { ...sample.app } : { cpu: 0, mem: 0 }
   )
@@ -165,7 +166,7 @@ export function ResourceBar() {
             data-testid="res-bar-cpu-ic"
             dangerouslySetInnerHTML={{ __html: icon('cpu', { size: 12 }) }}
           />
-          {sample ? fmtCpu(sample.app.cpu) : '–'}
+          {sample ? fmtCpu(Math.min(100, total.cpu)) : '–'}
         </span>
         <span className="res-item" data-testid="res-bar-mem">
           <span
@@ -176,7 +177,7 @@ export function ResourceBar() {
             data-testid="res-bar-mem-ic"
             dangerouslySetInnerHTML={{ __html: icon('memory-stick', { size: 12 }) }}
           />
-          {sample ? fmtMem(sample.app.mem) : '–'}
+          {sample ? fmtMem(total.mem) : '–'}
         </span>
       </div>
 
