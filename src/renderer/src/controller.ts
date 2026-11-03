@@ -1402,12 +1402,55 @@ export async function openTabCtx(tabId: string, x: number, y: number): Promise<v
       { label: t('在本组新建标签'), icon: icon('plus'), act: () => promptNewTabInGroup(ctx.group.id) },
       // 环境变量/cc 配置改完后就地换个新 PTY 生效，标签与会话都不动
       { label: t('重新加载标签页'), icon: icon('rotate-ccw'), act: () => reloadTab(tabId) },
+      { label: t('复制标签页信息'), icon: icon('copy'), act: () => void copyTabInfo(tabId) },
       { sep: true },
       { label: t('关闭标签'), icon: icon('close'), danger: true, act: () => closeTab(tabId) }
     ],
     x,
     y
   )
+}
+
+/** 把标签页的分组、目录、会话等信息拼成多行文字写进剪贴板 */
+async function copyTabInfo(tabId: string): Promise<void> {
+  const ctx = findTab(tabId)
+  if (!ctx) {
+    return
+  }
+  const { group, tab } = ctx
+  const lines = [t('分组 / 标签：{0} / {1}', group.name, tab.name)]
+  if (group.cwd) {
+    lines.push(t('目录：{0}', group.cwd))
+  }
+  const agent = remoteAgentOf(tab)
+  const sessionId = tab.activeSessionId
+  if (agent) {
+    lines.push(t('智能体：{0}', agent === 'codex' ? 'Codex' : 'Claude Code'))
+  }
+  if (agent && sessionId) {
+    lines.push(t('会话 ID：{0}', sessionId))
+    const resume = agent === 'codex' ? `codex resume ${sessionId}` : `claude --resume ${sessionId}`
+    lines.push(t('恢复命令：{0}', group.cwd ? `cd "${group.cwd}" && ${resume}` : resume))
+    const file = await window.term.sessionPath(sessionId, agent)
+    if (file) {
+      lines.push(t('会话记录：{0}', file))
+    }
+  }
+  if (tab.memo) {
+    lines.push(t('备注：{0}', tab.memo))
+  }
+  const text = lines.join('\n')
+  let ok = false
+  try {
+    ok = await window.term.writeClipboard(text)
+  } catch {}
+  if (!ok) {
+    try {
+      await navigator.clipboard.writeText(text)
+      ok = true
+    } catch {}
+  }
+  toast(ok ? t('已复制标签页信息') : t('复制失败'))
 }
 
 // 备注编辑弹窗：关闭即保存（含首次添加的空文本——空备注也算"有备注"，图标照常显示，删除只走右键）

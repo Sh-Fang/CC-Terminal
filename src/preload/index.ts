@@ -134,6 +134,8 @@ export interface TermBridge {
   agentAvailable(agent: AgentKind): Promise<boolean>
   claudeSessionExists(sessionId: string): Promise<boolean>
   codexSessionExists(sessionId: string): Promise<boolean>
+  // 会话记录文件的绝对路径；找不到返回 null
+  sessionPath(sessionId: string, agent: AgentKind): Promise<string | null>
   claudeSessionMeta(sessionId: string): Promise<SessionMeta>
   appVersion(): Promise<string>
   // npm 镜像测速：返回响应头到达耗时 ms；超时/连不上返回 -1
@@ -227,6 +229,7 @@ const api: TermBridge = {
   agentAvailable: (agent) => ipcRenderer.invoke('agent:available', agent),
   claudeSessionExists: (sessionId) => ipcRenderer.invoke('claude:sessionExists', sessionId),
   codexSessionExists: (sessionId) => ipcRenderer.invoke('codex:sessionExists', sessionId),
+  sessionPath: (sessionId, agent) => ipcRenderer.invoke('session:path', sessionId, agent),
   claudeSessionMeta: (sessionId) => ipcRenderer.invoke('claude:sessionMeta', sessionId),
   appVersion: () => ipcRenderer.invoke('app:version'),
   npmPing: (url) => ipcRenderer.invoke('npm:ping', url),

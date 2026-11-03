@@ -7,7 +7,8 @@ import { currentForeground, pokeForeground, startForegroundWatch } from './foreg
 import { sampleUsage } from './resource-usage'
 import { applyOp, setStoreChangeListener, snapshot, type StoreOp } from './store'
 import { agentPathSetting, isAgentAvailable, sessionExists } from './claude-helper'
-import { codexSessionExists } from './codex-helper'
+import { codexSessionExists, codexSessionPath } from './codex-helper'
+import { findSessionJsonl } from './claude-paths'
 import {
   cancelInstall as verCancelInstall,
   install as verInstall,
@@ -227,6 +228,9 @@ export function registerPtyIpc(
   ipcMain.handle('agent:available', (_e, agent: unknown) => isAgentAvailable(agentOf(agent)))
   ipcMain.handle('claude:sessionExists', (_e, sessionId: string) => sessionExists(sessionId))
   ipcMain.handle('codex:sessionExists', (_e, sessionId: string) => codexSessionExists(sessionId))
+  ipcMain.handle('session:path', (_e, sessionId: string, agent: unknown) =>
+    agentOf(agent) === 'codex' ? codexSessionPath(sessionId) : findSessionJsonl(sessionId)
+  )
   ipcMain.handle('claude:sessionMeta', (_e, sessionId: string) => readSessionMeta(sessionId))
   ipcMain.handle('ver:listInstalled', (_e, agent: unknown) => {
     const a = agentOf(agent)
