@@ -531,6 +531,8 @@ export const I18N_EN: Record<string, string> = {
   '输入': 'Message',
   '发送': 'Send',
   '已中断': 'Interrupted',
+  '来自 {0}': 'From {0}',
+  '来自其他 agent': 'From another agent',
   '还没有对话': 'No messages yet',
   '等待你操作': 'Waiting for you',
   '返回': 'Back',

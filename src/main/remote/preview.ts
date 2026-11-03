@@ -88,7 +88,7 @@ function decode(tab: RemoteTab, path: string, size: number): RemotePreview | nul
     }
     const b = m.blocks[m.blocks.length - 1]
     if (b) {
-      return blockPreview(m.role, b)
+      return blockPreview(m.role === 'user' ? 'user' : 'assistant', b)
     }
   }
   return null

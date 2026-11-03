@@ -203,8 +203,42 @@ function ToolRow(props: { tool: ToolBlock; testId: string }) {
   )
 }
 
+/** 别的 agent 发来的消息：一行灰字写明来源和首行，点开看全文 */
+function Notice(props: { m: ChatMessage; testId: string }) {
+  const { m } = props
+  const [open, setOpen] = useState(false)
+  const text = m.blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n')
+  const first = text.split('\n').find((l) => l.trim())?.trim() ?? ''
+  return (
+    <div className="rm-msg notice" data-testid={props.testId}>
+      <button
+        type="button"
+        className="rm-tool-head"
+        aria-expanded={open}
+        data-testid={`${props.testId}-head`}
+        onClick={() => setOpen(!open)}
+      >
+        <span className="rm-tool-verb" data-testid={`${props.testId}-from`}>
+          {m.from ? t('来自 {0}', m.from) : t('来自其他 agent')}
+        </span>
+        {!open && <span className="rm-notice-sum">{first}</span>}
+      </button>
+      {open && (
+        <div
+          className="rm-tool-body rm-md rm-notice-body"
+          data-testid={`${props.testId}-text`}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+        />
+      )}
+    </div>
+  )
+}
+
 function Message(props: { m: ChatMessage; testId: string }) {
   const { m } = props
+  if (m.role === 'notice') {
+    return <Notice m={m} testId={props.testId} />
+  }
   if (m.role === 'system') {
     return (
       <div className="rm-msg sys" data-testid={props.testId}>

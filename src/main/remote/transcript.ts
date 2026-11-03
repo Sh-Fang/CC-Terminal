@@ -162,11 +162,45 @@ function claudeHiddenUserText(s: string): boolean {
     t.startsWith('<local-command') ||
     t.startsWith('<system-reminder>') ||
     t.startsWith('<task-notification>') ||
+    t.startsWith('[SYSTEM NOTIFICATION') ||
     t.startsWith('<bash-stdout>') ||
     t.startsWith('<bash-stderr>') ||
     t.startsWith('Caveat:') ||
     t.startsWith('This session is being continued')
   )
+}
+
+// user 记录的 origin.kind：这些来自别的 agent 或自动触发，显示成通知；task-notification 是后台任务回报，隐藏。
+// 其余（human 及没见过的）照旧当用户消息
+const NOTICE_ORIGINS = new Set(['peer', 'coordinator', 'channel', 'auto-continuation', 'observer-activity', 'plugin'])
+const HIDDEN_ORIGINS = new Set(['task-notification'])
+
+// 别的 agent 发来的消息会包在这些标签里，以 user 身份写进记录
+const AGENT_TAG = /^<(teammate-message|cross-session-message|agent-message|channel)\b([^>]*)>/
+const AGENT_BLOCK = /<(teammate-message|cross-session-message|agent-message|channel)\b([^>]*)>([\s\S]*?)<\/\1>/g
+
+/** 标签属性里的发送方 */
+function agentFrom(attrs: string): string | undefined {
+  const m = /\b(?:teammate_id|from|source|name|server)="([^"]*)"/.exec(attrs)
+  return m?.[1]?.trim() || undefined
+}
+
+/** 别的 agent 发来的消息 → 每段的发送方与正文；不是这类消息返回 null */
+function claudeAgentNotices(s: string): Array<{ from?: string; text: string }> | null {
+  const t = s.trimStart()
+  const head = AGENT_TAG.exec(t)
+  if (!head) {
+    return null
+  }
+  const out: Array<{ from?: string; text: string }> = []
+  for (const m of t.matchAll(AGENT_BLOCK)) {
+    out.push({ from: agentFrom(m[2]), text: m[3].trim() })
+  }
+  // 没有闭合标签：去掉开头标签，剩下的都算正文
+  if (out.length === 0) {
+    out.push({ from: agentFrom(head[2]), text: t.slice(head[0].length).trim() })
+  }
+  return out
 }
 
 /** 斜杠命令记录 → "/命令 参数"；! 开头的 shell 命令 → "! 命令" */
@@ -218,9 +252,13 @@ export class TranscriptDecoder {
   }
 
   // ─── 公共 ─────────────────────────────
-  private push(role: ChatMessage['role'], id: string, ts: string, block: ChatBlock): void {
-    this.messages.push({ id, role, ts, blocks: [block] })
-    this.changed.add(this.messages[this.messages.length - 1])
+  private push(role: ChatMessage['role'], id: string, ts: string, block: ChatBlock, from?: string): void {
+    const m: ChatMessage = { id, role, ts, blocks: [block] }
+    if (from) {
+      m.from = from
+    }
+    this.messages.push(m)
+    this.changed.add(m)
   }
 
   /** agent 这一轮的消息；上一条不是 agent 的就新开一条 */
@@ -295,9 +333,10 @@ export class TranscriptDecoder {
     if (rec.isMeta === true || rec.isCompactSummary === true) {
       return
     }
+    const origin = str(((rec.origin ?? {}) as Record<string, unknown>).kind)
     const content = msg.content
     if (typeof content === 'string') {
-      this.claudeUserText(id, ts, content)
+      this.claudeUserText(id, ts, content, origin)
       return
     }
     for (const b of Array.isArray(content) ? (content as Array<Record<string, unknown>>) : []) {
@@ -315,13 +354,13 @@ export class TranscriptDecoder {
           }
         }
       } else if (b.type === 'text') {
-        this.claudeUserText(id, ts, str(b.text))
+        this.claudeUserText(id, ts, str(b.text), origin)
       } else {
       }
     }
   }
 
-  private claudeUserText(id: string, ts: string, text: string): void {
+  private claudeUserText(id: string, ts: string, text: string, origin: string): void {
     const cmd = claudeSlashCommand(text)
     if (cmd) {
       this.push('user', id, ts, { type: 'text', text: cmd })
@@ -334,7 +373,19 @@ export class TranscriptDecoder {
       this.push('system', id, ts, { type: 'text', text: 'interrupted' })
       return
     }
-    this.push('user', id, ts, { type: 'text', text })
+    const notices = claudeAgentNotices(text)
+    if (notices) {
+      notices.forEach((n, i) => {
+        if (n.text) {
+          this.push('notice', i === 0 ? id : `${id}-${i}`, ts, { type: 'text', text: n.text }, n.from)
+        }
+      })
+      return
+    }
+    if (HIDDEN_ORIGINS.has(origin)) {
+      return
+    }
+    this.push(NOTICE_ORIGINS.has(origin) ? 'notice' : 'user', id, ts, { type: 'text', text })
   }
 
   // ─── Codex ─────────────────────────────

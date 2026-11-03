@@ -82,7 +82,10 @@ export interface RemoteBrief {
 /** 对话视图里的一条消息 */
 export interface ChatMessage {
   id: string
-  role: 'user' | 'assistant' | 'system'
+  // notice：会话里别的 agent（子 agent、队友、其他会话）发来的消息，不是用户打的字
+  role: 'user' | 'assistant' | 'system' | 'notice'
+  // notice 的发送方，取不到时为空
+  from?: string
   ts: string
   blocks: ChatBlock[]
 }
