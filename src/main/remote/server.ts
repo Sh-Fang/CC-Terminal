@@ -1,6 +1,5 @@
 // 远程访问服务：同一端口上提供手机网页（http）和数据通道（WebSocket /ws）。
 // 开关关闭时不监听任何端口。手机先用一次性配对码换设备令牌，之后每次连接用令牌鉴权。
-import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -53,7 +52,6 @@ let sent: RemoteGroup[] = []
 // 有手机在线时定期检查会话记录，摘要变了就重发列表
 const PREVIEW_MS = 3000
 let previewTimer: ReturnType<typeof setInterval> | null = null
-let tailscaleName: string | null = null
 
 // ─── 静态页 ─────────────────────────────
 const MIME: Record<string, string> = {
@@ -124,21 +122,6 @@ function isTailscaleIp(ip: string): boolean {
   return a === 100 && b >= 64 && b <= 127
 }
 
-/** 后台查一次 Tailscale 的机器名（MagicDNS），查不到就只用 IP */
-function refreshTailscaleName(): void {
-  execFile('tailscale', ['status', '--json'], { timeout: 3000, windowsHide: true }, (err, stdout) => {
-    if (err) {
-      return
-    }
-    try {
-      const name = (JSON.parse(stdout) as { Self?: { DNSName?: string } }).Self?.DNSName
-      tailscaleName = name ? name.replace(/\.$/, '') : null
-    } catch {
-      tailscaleName = null
-    }
-  })
-}
-
 // 虚拟网卡（虚拟机、WSL、容器）的地址手机连不上，不列出来
 const VIRTUAL_NIC = /vEthernet|VirtualBox|VMware|Hyper-V|WSL|docker|vmnet|veth|br-|Loopback|Bluetooth/i
 // 网卡名看不出来时按 MAC 前缀认：VirtualBox、VMware、Hyper-V、TAP 类 VPN（深信服、OpenVPN 等）
@@ -160,9 +143,6 @@ function addresses(port: number): RemoteAddress[] {
         lan.push({ kind: 'lan', url: `http://${a.address}:${port}` })
       }
     }
-  }
-  if (ts.length > 0 && tailscaleName) {
-    ts.unshift({ kind: 'tailscale', url: `http://${tailscaleName}:${port}` })
   }
   return [...lan, ...ts]
 }
@@ -457,7 +437,6 @@ function start(port: number): void {
   })
   server = srv
   wss = ws
-  refreshTailscaleName()
 }
 
 /** 按配置启动或停止服务；配置变化后调用 */
