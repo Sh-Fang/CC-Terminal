@@ -16,9 +16,7 @@ import {
   confirmDialog,
   showCtxMenu,
   closeCtxMenu,
-  showUpdateProgress,
-  setUpdateProgress,
-  closeUpdateProgress,
+  setUpdateDot,
   toast,
   type CtxItem,
 } from "../state/overlays";
@@ -142,6 +140,8 @@ export function SettingsPanel() {
   const formRef = useRef(form);
   formRef.current = form;
   const [section, setSection] = useState("appearance");
+  const sectionRef = useRef(section);
+  sectionRef.current = section;
   const [agentTab, setAgentTab] = useState<AgentKind>("claude");
   // 找不到的智能体只显示版本区，方便安装
   const [agentAvail, setAgentAvail] = useState<Record<AgentKind, boolean>>({
@@ -168,6 +168,8 @@ export function SettingsPanel() {
   const [aboutUpdReady, setAboutUpdReady] = useState(false);
   const [aboutInstalling, setAboutInstalling] = useState(false);
   const [aboutUpdateVersion, setAboutUpdateVersion] = useState("");
+  const [aboutPercent, setAboutPercent] = useState(0);
+  const updateDot = useOverlays((s) => s.updateDot);
   const updateActionRef = useRef<"idle" | "checking" | "downloading" | "installing">("idle");
 
   // 开机自启：状态在系统登录项里，打开面板时读一次
@@ -203,12 +205,11 @@ export function SettingsPanel() {
     setAboutUpdateVersion(version);
     setAboutDownloading(true);
     setAboutUpdReady(false);
-    setAboutHint(t("下载中… {0}%", 0));
-    showUpdateProgress(version);
+    setAboutPercent(0);
+    setAboutHint("");
     void window.term.downloadUpdate().then((result) => {
       if (result.ok || updateActionRef.current !== "downloading") return;
       updateActionRef.current = "idle";
-      closeUpdateProgress();
       setAboutDownloading(false);
       const message = result.error === "not-owner" || result.error === "busy"
         ? t("更新操作正在其他窗口中进行。")
@@ -218,7 +219,6 @@ export function SettingsPanel() {
     }).catch(() => {
       if (updateActionRef.current !== "downloading") return;
       updateActionRef.current = "idle";
-      closeUpdateProgress();
       setAboutDownloading(false);
       const message = t("下载失败，请检查网络后重试。");
       setAboutHint(message);
@@ -227,8 +227,6 @@ export function SettingsPanel() {
   }
 
   function promptUpdateRestart(version: string): void {
-    setAboutUpdateVersion(version);
-    setAboutUpdReady(true);
     confirmDialog({
       title: t("更新已下载"),
       message: t(
@@ -240,9 +238,7 @@ export function SettingsPanel() {
       testIdPrefix: "update-restart",
       danger: false,
       onOk: requestUpdateInstall,
-      onCancel: () => deferCurrentUpdate(
-        t("新版本 {0} 已就绪，重启后生效。", `v${version}`)
-      ),
+      onCancel: () => void window.term.deferUpdate().catch(() => {}),
     });
   }
 
@@ -250,7 +246,7 @@ export function SettingsPanel() {
     if (updateActionRef.current !== "idle") return;
     updateActionRef.current = "installing";
     setAboutInstalling(true);
-    setAboutHint(t("正在启动安装程序…"));
+    setAboutHint("");
     void window.term.installUpdate().then((result) => {
       if (result.ok || updateActionRef.current !== "installing") return;
       updateActionRef.current = "idle";
@@ -281,7 +277,8 @@ export function SettingsPanel() {
       if (result.status === "update") {
         promptUpdateDownload(result.latest);
       } else if (result.status === "downloaded") {
-        promptUpdateRestart(result.latest);
+        setAboutUpdateVersion(result.latest);
+        setAboutUpdReady(true);
       } else if (result.status === "latest") {
         setAboutHint(t("已是最新版本。"));
       } else if (result.status === "busy") {
@@ -307,19 +304,22 @@ export function SettingsPanel() {
         updateActionRef.current = "downloading";
         setAboutUpdateVersion(event.version);
         setAboutDownloading(true);
-        if (!useOverlays.getState().updateProgress) showUpdateProgress(event.version);
-        setUpdateProgress(event.percent);
-        setAboutHint(t("下载中… {0}%", Math.floor(event.percent)));
+        setAboutPercent(Number.isFinite(event.percent) ? Math.min(100, Math.max(0, event.percent)) : 0);
+        setAboutHint("");
       } else if (event.kind === "downloaded") {
         updateActionRef.current = "idle";
-        closeUpdateProgress();
         setAboutDownloading(false);
         setAboutInstalling(false);
-        setAboutHint(t("新版本 {0} 已就绪，重启后生效。", `v${event.version}`));
-        promptUpdateRestart(event.version);
+        setAboutUpdateVersion(event.version);
+        setAboutUpdReady(true);
+        setAboutHint("");
+        // 正在看「关于」时不用再提醒
+        const st = useOverlays.getState();
+        if (!(st.settingsOpen && sectionRef.current === "about")) {
+          setUpdateDot(true);
+        }
       } else {
         updateActionRef.current = "idle";
-        closeUpdateProgress();
         setAboutDownloading(false);
         setAboutInstalling(false);
         if (event.stage === "install") setAboutUpdReady(true);
@@ -460,6 +460,10 @@ export function SettingsPanel() {
 
   function activateSection(name: string): void {
     setSection(name);
+    // 打开「关于」就算看过了，收起小红点
+    if (name === "about") {
+      setUpdateDot(false);
+    }
     if (name === "about" && !aboutVerLoadedRef.current) {
       aboutVerLoadedRef.current = true;
       void window.term.appVersion().then((v) => setAboutVer(v));
@@ -774,6 +778,7 @@ export function SettingsPanel() {
                 </svg>
               </span>
               {t("关于")}
+              {updateDot ? <span className="upd-dot" data-testid="set-nav-about-dot" /> : null}
             </button>
             <div className="settings-nav-foot">
               <button
@@ -1243,19 +1248,6 @@ export function SettingsPanel() {
                 <div className="about-ver">
                   {t("版本")} <span id="about-version">{aboutVer}</span>
                 </div>
-                <button
-                  id="about-check-update"
-                  className="btn btn-secondary"
-                  type="button"
-                  data-testid="about-check-update-button"
-                  disabled={aboutChecking || aboutDownloading || aboutUpdReady}
-                  onClick={() => void handleCheckUpdate()}
-                >
-                  {aboutChecking ? t("检查中…") : t("检查更新")}
-                </button>
-                <div className="about-hint" id="about-hint" data-testid="about-update-status">
-                  {aboutHint}
-                </div>
                 {aboutUpdReady ? (
                   <button
                     id="about-install-update"
@@ -1265,9 +1257,36 @@ export function SettingsPanel() {
                     disabled={aboutInstalling}
                     onClick={() => promptUpdateRestart(aboutUpdateVersion)}
                   >
-                    {aboutInstalling ? t("正在启动安装程序…") : t("重启并安装")}
+                    {aboutInstalling ? t("正在启动安装程序…") : t("重启并安装 {0}", `v${aboutUpdateVersion}`)}
                   </button>
-                ) : null}
+                ) : aboutDownloading ? (
+                  <div className="about-progress" data-testid="about-update-progress">
+                    <progress
+                      max={100}
+                      value={aboutPercent}
+                      aria-label={t("更新下载进度")}
+                      data-testid="about-update-progress-bar"
+                    />
+                    <div className="about-progress-label" data-testid="about-update-progress-label">
+                      <span data-testid="about-update-progress-version">{`v${aboutUpdateVersion}`}</span>
+                      <span data-testid="about-update-progress-value">{`${Math.floor(aboutPercent)}%`}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    id="about-check-update"
+                    className="btn btn-secondary"
+                    type="button"
+                    data-testid="about-check-update-button"
+                    disabled={aboutChecking}
+                    onClick={() => void handleCheckUpdate()}
+                  >
+                    {aboutChecking ? t("检查中…") : t("检查更新")}
+                  </button>
+                )}
+                <div className="about-hint" id="about-hint" data-testid="about-update-status">
+                  {aboutHint}
+                </div>
               </div>
             </div>
           </div>

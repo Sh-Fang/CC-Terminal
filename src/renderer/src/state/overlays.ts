@@ -46,10 +46,6 @@ export interface ConfirmOpts {
   onCancel?: () => void
 }
 
-export interface UpdateProgressState {
-  version: string
-  percent: number
-}
 
 // 标签备注编辑弹窗：无标题无按钮的圆角便签，点外部/Esc 关闭时把最终文本交回 onSave
 export interface MemoEditorOpts {
@@ -82,7 +78,8 @@ interface OverlaysState {
   modal: ModalOpts | null
   modalSeq: number
   confirm: ConfirmOpts | null
-  updateProgress: UpdateProgressState | null
+  // 新版本已下载、还没在「关于」里看过：设置按钮和「关于」导航上显示小红点
+  updateDot: boolean
   ctx: CtxState | null
   // toast 隐藏时保留 msg，淡出过程中文字不消失
   toastMsg: string
@@ -101,7 +98,7 @@ export const useOverlays = create<OverlaysState>(() => ({
   modal: null,
   modalSeq: 0,
   confirm: null,
-  updateProgress: null,
+  updateDot: false,
   ctx: null,
   toastMsg: '',
   toastShow: false,
@@ -166,18 +163,8 @@ export function resolveConfirm(ok: boolean): void {
   else cur.onCancel?.()
 }
 
-export function showUpdateProgress(version: string): void {
-  useOverlays.setState({ updateProgress: { version, percent: 0 } })
-}
-export function setUpdateProgress(percent: number): void {
-  const next = Number.isFinite(percent) ? Math.min(100, Math.max(0, percent)) : 0
-  useOverlays.setState((state) => state.updateProgress
-    ? { updateProgress: { ...state.updateProgress, percent: next } }
-    : {}
-  )
-}
-export function closeUpdateProgress(): void {
-  useOverlays.setState({ updateProgress: null })
+export function setUpdateDot(on: boolean): void {
+  useOverlays.setState({ updateDot: on })
 }
 
 export function openModal(cfg: ModalOpts): void {

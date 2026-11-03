@@ -174,6 +174,7 @@ export const I18N_EN: Record<string, string> = {
   '新版本 {0} 已下载完成。立即重启将终止所有终端会话，并打开安装程序。': 'Version {0} has been downloaded. Restarting now will terminate all terminal sessions and open the installer.',
   '新版本 {0} 已就绪，重启后生效。': 'Version {0} is ready. Restart to apply.',
   '重启并安装': 'Restart & Install',
+  '重启并安装 {0}': 'Restart & Install {0}',
   '正在启动安装程序…': 'Starting installer…',
   '下载失败，请检查网络后重试。': 'Download failed. Check your network and try again.',
   '安装程序启动失败，请重试。': 'Failed to start the installer. Please try again.',

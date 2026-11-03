@@ -401,43 +401,6 @@ function ConfirmDialog() {
   )
 }
 
-function UpdateProgressDialog() {
-  const progress = useOverlays((state) => state.updateProgress)
-  const percent = Math.floor(progress?.percent ?? 0)
-  return (
-    <div
-      id="updateProgressScrim"
-      className="scrim"
-      hidden={!progress}
-      data-testid="update-download-progress-overlay"
-    >
-      <div
-        className="modal modal-update-progress"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="update-progress-title"
-        data-testid="update-download-progress-dialog"
-      >
-        <h2 id="update-progress-title" data-testid="update-download-progress-title">
-          {t('正在下载更新')}
-        </h2>
-        <div className="update-progress-version" data-testid="update-download-progress-version">
-          {progress ? t('新版本 {0}', `v${progress.version}`) : ''}
-        </div>
-        <progress
-          max={100}
-          value={progress?.percent ?? 0}
-          aria-label={t('更新下载进度')}
-          data-testid="update-download-progress-bar"
-        />
-        <div className="update-progress-status" data-testid="update-download-progress-value">
-          {t('下载中… {0}%', percent)}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // 会话选择浮层：点「N 会话」徽标弹出的小列表，管理页与勾选弹窗两个恢复入口共用。
 // 锚定在徽标下方，越界自动上翻/内收；外部点击 / Esc / 滚动即关闭。
 function MemoEditorBody({ opts }: { opts: MemoEditorOpts }) {
@@ -557,7 +520,6 @@ export function OverlayHost() {
       <CtxMenu />
       <ModalDialog />
       <ConfirmDialog />
-      <UpdateProgressDialog />
       <MemoEditor />
       <MemoTip />
     </>

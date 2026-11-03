@@ -18,7 +18,7 @@ import {
   setTabDragData,
   sessionTitleIn
 } from '../controller'
-import { openSettings, showMemoTip, hideMemoTip } from '../state/overlays'
+import { openSettings, showMemoTip, hideMemoTip, useOverlays } from '../state/overlays'
 import { formatTs, midEllipsis, statusLabel } from '../lib/format'
 import { icon } from '../svg-icons'
 import { t } from '../i18n'
@@ -87,6 +87,7 @@ function addTabInActiveGroup(): void {
 
 export function Toolbar() {
   const rev = useAppStore((s) => s.rev)
+  const updateDot = useOverlays((s) => s.updateDot)
   void rev
   const [menuOpen, setMenuOpen] = useState(false)
   // 标签条 chip 同分组内拖动排序
@@ -311,12 +312,14 @@ export function Toolbar() {
               </svg>
             </button>
             <button
-              className="tool-icon-btn"
+              className="tool-icon-btn upd-dot-host"
               type="button"
               title={t('设置')}
               aria-label={t('设置')}
+              data-testid="tabstrip-settings-button"
               onClick={() => openSettings()}
             >
+              {updateDot ? <span className="upd-dot" data-testid="tabstrip-settings-dot" /> : null}
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -374,12 +377,14 @@ export function Toolbar() {
           </span>
         </div>
         <button
-          className="tool-icon-btn"
+          className="tool-icon-btn upd-dot-host"
           id="settingsBtn"
+          data-testid="toolbar-settings-button"
           title={t('设置')}
           aria-label={t('设置')}
           onClick={() => openSettings()}
         >
+          {updateDot ? <span className="upd-dot" data-testid="toolbar-settings-dot" /> : null}
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
