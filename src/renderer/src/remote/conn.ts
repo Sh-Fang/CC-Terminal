@@ -101,9 +101,10 @@ export class Conn {
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`)
     this.ws = ws
     ws.onopen = () => {
-      const hello: ClientMsg = this.pairCode
-        ? { t: 'pair', v: REMOTE_PROTOCOL, code: this.pairCode, name: deviceName() }
-        : { t: 'hello', v: REMOTE_PROTOCOL, token: token ?? '' }
+      // 已有令牌时先用令牌，令牌失效才用配对码，避免同一浏览器重复扫码变成多台设备
+      const hello: ClientMsg = token
+        ? { t: 'hello', v: REMOTE_PROTOCOL, token }
+        : { t: 'pair', v: REMOTE_PROTOCOL, code: this.pairCode ?? '', name: deviceName() }
       ws.send(JSON.stringify(hello))
     }
     ws.onmessage = (e) => {
@@ -143,7 +144,12 @@ export class Conn {
       this.setState('ready')
     } else if (msg.t === 'err' && (msg.code === 'auth' || msg.code === 'revoked')) {
       localStorage.removeItem(TOKEN_KEY)
-      this.setState('denied')
+      if (msg.code === 'auth' && this.pairCode) {
+        // 令牌失效但带着配对码：断开后用配对码重连
+        this.setState('connecting')
+      } else {
+        this.setState('denied')
+      }
     } else if (msg.t === 'err' && msg.code === 'pair') {
       this.pairCode = null
       // 已经配对过的设备扫了过期的码：断开后照常用旧令牌重连
