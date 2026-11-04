@@ -38,6 +38,8 @@ export interface QuickItem {
   sub: string
   // 有值表示属于已关闭的标签页
   closedAt?: string
+  // 有值表示选中后进入该分组，列出它的标签页
+  enterGroup?: { id: string; name: string }
   act: () => void
 }
 

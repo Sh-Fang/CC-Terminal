@@ -8,6 +8,8 @@ export const I18N_EN: Record<string, string> = {
   '路径': 'Paths',
   '智能体': 'Agents',
   '没有匹配项': 'No matches',
+  '已打开': 'Open',
+  '已关闭': 'Closed',
   '近 7 天没有关闭的标签页': 'No tabs closed in the last 7 days',
   '近 7 天': 'Last 7 days',
   '标签页': 'Tabs',

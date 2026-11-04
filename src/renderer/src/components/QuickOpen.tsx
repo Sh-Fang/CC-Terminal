@@ -1,10 +1,11 @@
 // Ctrl+P 全局搜索：无关键字时列出近 7 天关闭的标签页，有关键字时按搜索类别分组列出结果；两种情况都受类别开关筛选。
 // 输入框下方的类别开关写进设置，下次打开沿用。
+// 选中分组结果可进入该分组，列出它打开的与已关闭的标签页，输入为空时退格或按 Esc 退回。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as RKeyboardEvent, MouseEvent as RMouseEvent } from 'react'
 import { useOverlays, closeQuickOpen } from '../state/overlays'
 import { useAppStore } from '../state/store'
-import { getQuickHistory, getSettings, quickSearch, updateSettings, type QuickItem } from '../controller'
+import { getQuickHistory, getSettings, quickGroupTabs, quickSearch, updateSettings, type QuickItem } from '../controller'
 import { formatTs, highlightRanges } from '../lib/format'
 import { icon } from '../svg-icons'
 import { t } from '../i18n'
@@ -23,15 +24,22 @@ function QuickOpenBody() {
   const [query, setQuery] = useState('')
   const [sel, setSel] = useState(0)
   const [scopes, setScopes] = useState(() => getSettings().searchScopes)
+  // 进入的分组；prevQuery 用于退回时恢复原来的关键字
+  const [inGroup, setInGroup] = useState<{ id: string; name: string; prevQuery: string } | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
   const downOnScrimRef = useRef(false)
 
   // rev 变化（如后台补齐了会话标题）时重算结果
   const groups = useMemo(
-    () => (query.trim() ? quickSearch(query, scopes) : getQuickHistory(scopes)),
+    () => {
+      if (inGroup) {
+        return quickGroupTabs(inGroup.id, query)
+      }
+      return query.trim() ? quickSearch(query, scopes) : getQuickHistory(scopes)
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [query, scopes, rev]
+    [query, scopes, inGroup, rev]
   )
   const flat = groups.flatMap((g) => g.items)
 
@@ -41,7 +49,7 @@ function QuickOpenBody() {
 
   useEffect(() => {
     setSel(0)
-  }, [query, scopes])
+  }, [query, scopes, inGroup])
 
   // 选中项滚进可视区
   useEffect(() => {
@@ -49,8 +57,27 @@ function QuickOpenBody() {
     el?.scrollIntoView({ block: 'nearest' })
   }, [sel])
 
+  const enter = (g: { id: string; name: string }): void => {
+    setInGroup({ ...g, prevQuery: query })
+    setQuery('')
+    inputRef.current?.focus()
+  }
+
+  const leave = (): void => {
+    if (!inGroup) {
+      return
+    }
+    setQuery(inGroup.prevQuery)
+    setInGroup(null)
+    inputRef.current?.focus()
+  }
+
   const run = (item: QuickItem | undefined): void => {
     if (!item) return
+    if (item.enterGroup) {
+      enter(item.enterGroup)
+      return
+    }
     closeQuickOpen()
     item.act()
   }
@@ -72,9 +99,22 @@ function QuickOpenBody() {
     } else if (e.key === 'Enter') {
       e.preventDefault()
       run(flat[sel])
+    } else if (e.key === 'Tab' || (e.key === 'ArrowRight' && e.currentTarget.selectionStart === query.length)) {
+      const g = flat[sel]?.enterGroup
+      if (g) {
+        e.preventDefault()
+        enter(g)
+      }
+    } else if (e.key === 'Backspace' && inGroup && query === '') {
+      e.preventDefault()
+      leave()
     } else if (e.key === 'Escape') {
       e.preventDefault()
-      closeQuickOpen()
+      if (inGroup) {
+        leave()
+      } else {
+        closeQuickOpen()
+      }
     } else {
     }
   }
@@ -92,37 +132,54 @@ function QuickOpenBody() {
   return (
     <div className="scrim qo-scrim" data-testid="quick-open-scrim" onMouseDown={onScrimDown} onClick={onScrimClick}>
       <div className="qo" role="dialog" aria-modal="true" aria-label={t('全局搜索')} data-testid="quick-open">
-        <input
-          ref={inputRef}
-          className="qo-input"
-          data-testid="quick-open-input"
-          type="search"
-          aria-label={t('全局搜索')}
-          placeholder={t('搜索')}
-          autoComplete="off"
-          spellCheck={false}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={onKeyDown}
-        />
-        <div className="qo-scopes" role="group" aria-label={t('搜索类别')}>
-          {SCOPES.map((sc) => (
+        <div className="qo-field" data-testid="quick-open-field">
+          {inGroup && (
             <button
-              key={sc.key}
               type="button"
-              className={'qo-scope' + (scopes[sc.key] ? ' on' : '')}
-              data-testid={`quick-open-scope-${sc.key}`}
-              aria-pressed={scopes[sc.key]}
-              onClick={() => toggleScope(sc.key)}
+              className="qo-crumb"
+              data-testid="quick-open-crumb"
+              aria-label={t('返回')}
+              title={t('返回')}
+              onClick={leave}
             >
-              {t(sc.label)}
+              <span className="qo-crumb-name">{inGroup.name}</span>
+              <span className="qo-crumb-ic" dangerouslySetInnerHTML={{ __html: icon('chevron-right', { size: 12 }) }} />
             </button>
-          ))}
+          )}
+          <input
+            ref={inputRef}
+            className="qo-input"
+            data-testid="quick-open-input"
+            type="search"
+            aria-label={t('全局搜索')}
+            placeholder={t('搜索')}
+            autoComplete="off"
+            spellCheck={false}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+          />
         </div>
+        {!inGroup && (
+          <div className="qo-scopes" role="group" aria-label={t('搜索类别')}>
+            {SCOPES.map((sc) => (
+              <button
+                key={sc.key}
+                type="button"
+                className={'qo-scope' + (scopes[sc.key] ? ' on' : '')}
+                data-testid={`quick-open-scope-${sc.key}`}
+                aria-pressed={scopes[sc.key]}
+                onClick={() => toggleScope(sc.key)}
+              >
+                {t(sc.label)}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="qo-list" ref={listRef} data-testid="quick-open-list">
           {flat.length === 0 && (
             <div className="qo-empty" data-testid="quick-open-empty">
-              {query.trim() ? t('没有匹配项') : t('近 7 天没有关闭的标签页')}
+              {query.trim() || inGroup ? t('没有匹配项') : t('近 7 天没有关闭的标签页')}
             </div>
           )}
           {groups.map((g, gi) => (
@@ -145,6 +202,13 @@ function QuickOpenBody() {
                     <span className="qo-title" dangerouslySetInnerHTML={{ __html: highlightRanges(it.title, it.titleHl) }} />
                     <span className="qo-sub">{it.sub}</span>
                     {it.closedAt && <span className="qo-when">{formatTs(it.closedAt)}</span>}
+                    {it.enterGroup && (
+                      <span
+                        className="qo-enter"
+                        data-testid={`quick-open-enter-${i}`}
+                        dangerouslySetInnerHTML={{ __html: icon('chevron-right', { size: 14 }) }}
+                      />
+                    )}
                   </div>
                 )
               })}

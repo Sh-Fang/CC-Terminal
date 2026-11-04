@@ -1632,6 +1632,7 @@ export function quickSearch(query: string, scopes: Settings['searchScopes']): Qu
           title: g.name,
           titleHl: r.highlights[0],
           sub: g.cwd,
+          enterGroup: store.tabs.some((x) => x.groupId === g.id) ? { id: g.id, name: g.name } : undefined,
           act: () => void openGroupFromSearch(g.id)
         },
         score: r.score
@@ -1719,6 +1720,40 @@ export function quickSearch(query: string, scopes: Settings['searchScopes']): Qu
     if (hits.length > 0) out.push({ label: t('路径'), items: rank(hits) })
   }
   return out
+}
+
+/** 进入分组后：列出该分组的标签页，有关键字时按标签页名字与主会话标题筛选 */
+export function quickGroupTabs(groupId: string, query: string): QuickGroup[] {
+  const q = query.trim()
+  const recs = store.tabs.filter((x) => x.groupId === groupId)
+  // 打开的按侧栏顺序，已关闭的按关闭时间倒序
+  const order = findGroup(groupId)?.tabs.map((x) => x.id) ?? []
+  const opened = recs.filter((x) => !x.closedAt).sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
+  const closed = recs
+    .filter((x) => x.closedAt)
+    .sort((a, b) => Date.parse(b.closedAt!) - Date.parse(a.closedAt!))
+  const pick = (list: TabRec[]): QuickItem[] => {
+    const items: QuickItem[] = []
+    for (const rec of list) {
+      const sessions = sessionsOfStack(rec.stack)
+      const top = sessions.find((x) => x.sessionId === rec.stack[0])
+      const topTitle = top ? sessionTitle(top, sessions, rec.name) : ''
+      const sub = topTitle && topTitle !== rec.name ? topTitle : ''
+      if (!q) {
+        items.push(tabItem(rec, undefined, sub))
+        continue
+      }
+      const r = fuzzySearch(q, [rec.name, topTitle])
+      if (r) {
+        items.push(tabItem(rec, r.highlights[0], sub))
+      }
+    }
+    return items
+  }
+  return [
+    { label: t('已打开'), items: pick(opened) },
+    { label: t('已关闭'), items: pick(closed) }
+  ].filter((g) => g.items.length > 0)
 }
 
 // 标签拖拽（Sidebar/Toolbar 共用）：自定义 MIME 传 tabId，只用于同分组内排序
