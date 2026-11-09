@@ -75,6 +75,8 @@ export function createPty(
 
   // 用 snapshotCurrentEnv：Windows 主进程 env 启动时冻结，感知不到 setx/注册表改动
   const env: Record<string, string> = { ...snapshotCurrentEnv(!!opts.freshEnv), ...(opts.env ?? {}) }
+  // 去掉从父进程继承来的防重复注入标记（应用本身从本应用的终端里启动时会带上），否则新 shell 跳过 shell-integration
+  delete env.__TERMINAL_SHELL_INTEG
 
   const shellInfo = resolveShell()
   const profilePath = shellInfo.profileKey ? opts.profiles?.[shellInfo.profileKey] : undefined
