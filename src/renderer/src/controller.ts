@@ -896,7 +896,7 @@ async function openHereWithPath(rawPath: string): Promise<void> {
     toast(t('路径不存在：{0}', p))
     return
   }
-  const live = groups.find((x) => x.cwd === p)
+  const live = groups.find((x) => normalizeCwd(x.cwd) === p)
   const gid = live ? live.id : await createGroup(basenameOfPath(p) || p, p)
   const count = live ? live.tabs.length : 0
   const tab = await createTab(gid, String.fromCharCode(65 + count), 'terminal')
@@ -1140,14 +1140,11 @@ async function doReloadTab(tabId: string): Promise<void> {
   }
 }
 
-// 挂起：结束 shell 与智能体、清空画面，停在启动画面等用户点恢复；下一层的临时会话一并关闭
+// 挂起：结束 shell 与智能体、清空画面，停在启动画面等用户点恢复；下一层的临时会话不受影响
 async function doSuspendTab(tabId: string): Promise<void> {
   const ctx = findTab(tabId)
   if (!ctx || isChildId(tabId) || reloadingTabs.has(tabId) || awaitingResume.has(tabId)) return
   const { tab } = ctx
-  for (const c of [...(children.get(tabId) ?? [])]) {
-    closeChild(c.id)
-  }
   endLaunchScreen(tabId)
   launchAborted.delete(tabId)
   awaitingResume.add(tabId)
