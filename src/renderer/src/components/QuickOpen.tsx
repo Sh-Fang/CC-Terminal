@@ -1,11 +1,12 @@
 // Ctrl+P 全局搜索：无关键字时列出近 7 天关闭的标签页，有关键字时按搜索类别分组列出结果；两种情况都受类别开关筛选。
 // 输入框下方的类别开关写进设置，下次打开沿用。
 // 选中分组结果可进入该分组，列出它打开的与已关闭的标签页，输入为空时退格或按 Esc 退回。
+// 选中已关闭的标签页或会话会重新打开它，弹窗不关，可接着选。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as RKeyboardEvent, MouseEvent as RMouseEvent } from 'react'
 import { useOverlays, closeQuickOpen } from '../state/overlays'
 import { useAppStore } from '../state/store'
-import { getQuickHistory, getSettings, quickGroupTabs, quickSearch, updateSettings, type QuickItem } from '../controller'
+import { focusActiveTerm, getQuickHistory, getSettings, quickGroupTabs, quickSearch, updateSettings, type QuickItem } from '../controller'
 import { formatTs, highlightRanges } from '../lib/format'
 import { icon } from '../svg-icons'
 import { t } from '../i18n'
@@ -51,6 +52,12 @@ function QuickOpenBody() {
     setSel(0)
   }, [query, scopes, inGroup])
 
+  // 重新打开的项从列表移走后，选中项不越界
+  useEffect(() => {
+    if (sel >= flat.length) setSel(Math.max(0, flat.length - 1))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flat.length])
+
   // 选中项滚进可视区
   useEffect(() => {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${sel}"]`)
@@ -78,8 +85,18 @@ function QuickOpenBody() {
       enter(item.enterGroup)
       return
     }
+    if (item.closedAt) {
+      item.act()
+      inputRef.current?.focus()
+      return
+    }
     closeQuickOpen()
     item.act()
+  }
+
+  const close = (): void => {
+    closeQuickOpen()
+    focusActiveTerm()
   }
 
   const toggleScope = (key: ScopeKey): void => {
@@ -113,7 +130,7 @@ function QuickOpenBody() {
       if (inGroup) {
         leave()
       } else {
-        closeQuickOpen()
+        close()
       }
     } else {
     }
@@ -124,7 +141,7 @@ function QuickOpenBody() {
     downOnScrimRef.current = e.target === e.currentTarget
   }
   const onScrimClick = (e: RMouseEvent): void => {
-    if (e.target === e.currentTarget && downOnScrimRef.current) closeQuickOpen()
+    if (e.target === e.currentTarget && downOnScrimRef.current) close()
     downOnScrimRef.current = false
   }
 

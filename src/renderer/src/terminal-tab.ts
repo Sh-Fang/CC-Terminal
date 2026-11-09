@@ -5,6 +5,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { backgroundFor, terminalFontFamily, themeForPreset, type Settings } from './themes'
 import { t } from './i18n'
+import { useOverlays } from './state/overlays'
 
 export interface TermTabHandlers {
   copySelectionAsAnswer: () => boolean
@@ -811,7 +812,8 @@ export class TerminalTab {
       this.refit()
       // display:none→block 后 xterm 不自动重绘；refit 未变尺寸时不触发重画，兜底刷一次
       try { this.term.refresh(0, Math.max(0, this.term.rows - 1)) } catch {}
-      this.term.focus()
+      // Ctrl+P 开着时焦点留在搜索框
+      if (!useOverlays.getState().quickOpen) this.term.focus()
       dbg(this.id, 'setActive rAF: done')
     })
   }

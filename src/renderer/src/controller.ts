@@ -312,6 +312,10 @@ export function getActiveTabId(): string | null {
   return activeTabId
 }
 
+export function focusActiveTerm(): void {
+  activeContext()?.tab.term.focus()
+}
+
 export function refitActive(): void {
   activeContext()?.tab.refit()
 }
@@ -1570,16 +1574,25 @@ function historyEntryOf(x: TabRec): HistoryEntry {
 
 
 // 重新打开历史标签页：沿用原 id、原分组与会话栈
+// 正在重新打开的标签页：Ctrl+P 不关窗时连按两次不重复打开
+const reopening = new Set<string>()
+
 export async function restoreFromHistory(entry: HistoryEntry): Promise<void> {
   if (findTab(entry.tabId)) {
     activateTab(entry.tabId)
     return
   }
-  await op({ op: 'reopenTab', id: entry.tabId })
-  const rec = tabRec(entry.tabId)
-  const g = rec ? liveGroup(rec.groupId) : null
-  if (!rec || !g) return
-  await openNewTab(mountTab(g, rec))
+  if (reopening.has(entry.tabId)) return
+  reopening.add(entry.tabId)
+  try {
+    await op({ op: 'reopenTab', id: entry.tabId })
+    const rec = tabRec(entry.tabId)
+    const g = rec ? liveGroup(rec.groupId) : null
+    if (!rec || !g) return
+    await openNewTab(mountTab(g, rec))
+  } finally {
+    reopening.delete(entry.tabId)
+  }
 }
 
 // ── Ctrl+P 全局搜索 ────────────────────────────────────────────────
@@ -1650,11 +1663,17 @@ async function openSessionFromSearch(sessionId: string, rec: TabRec): Promise<vo
     }
     return
   }
-  await op({ op: 'reopenTab', id: rec.id, top: sessionId })
-  const fresh = tabRec(rec.id)
-  const g = fresh ? liveGroup(fresh.groupId) : null
-  if (!fresh || !g) return
-  await openNewTab(mountTab(g, fresh))
+  if (findTab(rec.id) || reopening.has(rec.id)) return
+  reopening.add(rec.id)
+  try {
+    await op({ op: 'reopenTab', id: rec.id, top: sessionId })
+    const fresh = tabRec(rec.id)
+    const g = fresh ? liveGroup(fresh.groupId) : null
+    if (!fresh || !g) return
+    await openNewTab(mountTab(g, fresh))
+  } finally {
+    reopening.delete(rec.id)
+  }
 }
 
 // 从搜索结果打开分组：有打开的标签页就切过去并在侧栏定位，没有就新建一个标签页
