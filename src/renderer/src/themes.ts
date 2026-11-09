@@ -179,7 +179,14 @@ export function themeForPreset(name: ThemePreset): ITheme {
   // 拆掉 label / backgroundCss，只留 xterm ITheme 字段
   const { label: _l, backgroundCss: _b, ...rest } = t
   void _l; void _b
-  return rest
+  // 滚动条滑块按前景色加透明度，随主题走
+  const fg = rest.foreground ?? '#e5e5e5'
+  return {
+    ...rest,
+    scrollbarSliderBackground: `${fg}33`,
+    scrollbarSliderHoverBackground: `${fg}59`,
+    scrollbarSliderActiveBackground: `${fg}80`
+  }
 }
 
 export function backgroundFor(name: ThemePreset): string {

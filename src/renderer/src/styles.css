@@ -854,6 +854,8 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
 .term-host .xterm-screen { overflow: hidden; }
 .xterm-viewport::-webkit-scrollbar { width: 8px; }
 .xterm-viewport::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 4px; }
+/* 行数向下取整后底部留下的余量透出 term-host 的主题背景，不用 xterm 自带的纯黑 */
+.term-host .xterm .xterm-viewport { background-color: transparent; }
 
 /* 资源占用：状态栏右端 */
 .res-bar {
