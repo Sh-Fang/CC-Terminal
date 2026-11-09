@@ -66,9 +66,10 @@ export async function runInShell(page: Page, tabId: string, cmd: string): Promis
   await page.keyboard.press('Enter')
 }
 
-/** 等 pwsh 提示符出现 */
+/** 等 pwsh 提示符出现，且 shell 的启动画面（只有图标和转圈）已撤掉 */
 export async function waitShellPrompt(page: Page, tabId: string, timeout = 30_000): Promise<void> {
   await waitScreen(page, tabId, process.platform === 'win32' ? /PS [A-Za-z]:\\[^\n]*>/ : /[$%#>] ?$/m, timeout)
+  await expect(launchScreen(page, tabId).and(page.locator(':not(:has(.launch-label, .launch-action))'))).toHaveCount(0, { timeout })
 }
 
 /** 右键标签页行，返回菜单项文字（不含分隔线） */

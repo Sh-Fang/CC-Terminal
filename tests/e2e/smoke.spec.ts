@@ -9,7 +9,9 @@ import {
   menuItems,
   openTabMenu,
   readConfirm,
+  launchScreen,
   runInShell,
+  screenText,
   tabRow,
   waitScreen,
   waitShellPrompt
@@ -32,6 +34,21 @@ test('启动后新建终端标签页，shell 能回显命令输出', async ({ la
   if ((await kindTerm.count()) > 0) {
     await kindTerm.click()
   }
+  // 记下新 shell 启动时盖上的启动画面
+  await page.evaluate(() => {
+    const seen: string[] = []
+    ;(window as unknown as { __e2eLaunchScreens: string[] }).__e2eLaunchScreens = seen
+    new MutationObserver((muts) => {
+      for (const m of muts) {
+        for (const n of m.addedNodes) {
+          if (n instanceof HTMLElement && n.classList.contains('launch-screen')) {
+            const id = n.closest('[data-tab-id]')?.getAttribute('data-tab-id') ?? ''
+            seen.push(id + (n.querySelector('.launch-spinner') ? '|spin' : '') + (n.querySelector('.launch-label') ? '|label' : ''))
+          }
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true })
+  })
   await page.locator('#modal-ok').click()
 
   const findEcho = () => readStore(h.userData).tabs.find((x) => x.name === 'Echo' && !x.closedAt)
@@ -40,6 +57,13 @@ test('启动后新建终端标签页，shell 能回显命令输出', async ({ la
   expect(rec.autoLaunchCC).toBe(false)
   await expect(tabRow(page, rec.id)).toHaveClass(/active/)
   await waitShellPrompt(page, rec.id)
+  if (process.platform === 'win32') {
+    // 启动画面只有终端图标和转圈，提示符出来后撤掉，屏上不留注入命令
+    const ls = launchScreen(page, rec.id)
+    await expect(ls).toHaveCount(0)
+    expect(await page.evaluate(() => (window as unknown as { __e2eLaunchScreens: string[] }).__e2eLaunchScreens)).toContain(`${rec.id}|spin`)
+    expect(await screenText(page, rec.id)).not.toMatch(/chcp 65001|shell-integration/)
+  }
   await runInShell(page, rec.id, 'echo ("e2e-" + (40 + 2))')
   // 输出行只有 e2e-42，命令行本身是 echo (...)
   await waitScreen(page, rec.id, /^e2e-42$/m)

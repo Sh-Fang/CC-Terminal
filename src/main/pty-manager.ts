@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import { basename } from 'node:path'
 import { execSync } from 'node:child_process'
 import { snapshotCurrentEnv } from './sys-env'
+import { SHELL_READY_TITLE } from '../shared/shell-ready'
 
 const IS_WIN = process.platform === 'win32'
 const PWSH_PRIMARY = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'
@@ -102,9 +103,10 @@ export function createPty(
   if (IS_WIN) {
     // chcp 65001 + Input/OutputEncoding 一起置 UTF-8（只设 Output 时中文粘贴按 GBK 解码会乱码）；
     // shell-integration 必须同一行 dot-source，晚了首条命令就不发 OSC 序列。
+    // dot-source 前清屏，屏上不留这行注入命令的回显；最后改窗口标题通知渲染层撤掉启动画面
     const profileSuffix = profilePath ? `; . ${quoteSingle(profilePath)}` : ''
     proc.write(
-      `chcp 65001 > $null; [Console]::OutputEncoding = [Console]::InputEncoding = [System.Text.Encoding]::UTF8${profileSuffix}\r`
+      `chcp 65001 > $null; [Console]::OutputEncoding = [Console]::InputEncoding = [System.Text.Encoding]::UTF8; Clear-Host${profileSuffix}; $Host.UI.RawUI.WindowTitle = '${SHELL_READY_TITLE}'\r`
     )
   }
 

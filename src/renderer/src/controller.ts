@@ -443,6 +443,7 @@ const launchWatch = new Map<string, LaunchWatch>()
 const launchAborted = new Set<string>()
 const LAUNCH_QUIET_MS = 300
 const LAUNCH_TIMEOUT_MS = 20000
+const SHELL_BOOT_TIMEOUT_MS = 5000
 // 启动恢复的智能体标签页：首次起 PTY 时停在启动画面，点「恢复会话」才拉起智能体
 const awaitingResume = new Set<string>()
 
@@ -482,6 +483,25 @@ function beginLaunchScreen(tab: TerminalTab, agent: AgentKind, resume: boolean):
     quietTimer: null,
     timeout: window.setTimeout(() => endLaunchScreen(tab.id), LAUNCH_TIMEOUT_MS)
   })
+}
+
+// Windows 终端标签页起 shell 时盖上启动画面，注入的启动命令跑完或超时后撤掉
+const shellBooting = new Map<string, { tab: TerminalTab; timer: number }>()
+
+function beginShellScreen(tab: TerminalTab): void {
+  if (!IS_WIN_PLATFORM) return
+  endShellScreen(tab.id)
+  tab.showLaunchScreen(icon('square-terminal', { size: 40 }), '')
+  shellBooting.set(tab.id, { tab, timer: window.setTimeout(() => endShellScreen(tab.id), SHELL_BOOT_TIMEOUT_MS) })
+}
+
+function endShellScreen(tabId: string): void {
+  const b = shellBooting.get(tabId)
+  if (!b) return
+  shellBooting.delete(tabId)
+  window.clearTimeout(b.timer)
+  // 期间改成启动智能体时启动画面归智能体流程管
+  if (!launchWatch.has(tabId) && !awaitingResume.has(tabId)) b.tab.hideLaunchScreen()
 }
 
 function endLaunchScreen(tabId: string): void {
@@ -532,11 +552,14 @@ function armLaunchQuiet(w: LaunchWatch): void {
   }, LAUNCH_QUIET_MS)
 }
 
-// 即将起 PTY / 重启 PTY 且会自动拉起智能体时，先盖上启动画面
+// 即将起 PTY / 重启 PTY 时先盖上启动画面：会自动拉起智能体的盖智能体的，其余盖 shell 的
 function beginLaunchScreenIfAuto(tab: TerminalTab): void {
   awaitingResume.delete(tab.id)
   launchAborted.delete(tab.id)
-  if (!tab.autoLaunchCC) return
+  if (!tab.autoLaunchCC) {
+    beginShellScreen(tab)
+    return
+  }
   const plan = launchPlan(tab)
   beginLaunchScreen(tab, plan.agent, plan.resume)
 }
@@ -732,6 +755,7 @@ function buildTab(group: Group, opts: {
         tabRef.note = note
         refreshUI()
       },
+      onShellReady: () => endShellScreen(id),
       onShellCommand: (kind, cmd) => {
         const lw = launchWatch.get(id)
         if (lw?.sent) {

@@ -6,6 +6,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { backgroundFor, terminalFontFamily, themeForPreset, type Settings } from './themes'
 import { t } from './i18n'
 import { useOverlays } from './state/overlays'
+import { SHELL_READY_TITLE } from '../../shared/shell-ready'
 
 export interface TermTabHandlers {
   copySelectionAsAnswer: () => boolean
@@ -21,6 +22,8 @@ export interface TermTabHandlers {
   onErrorDetected?: (note?: string) => void
   // pwsh shell integration（OSC 133;C/D + 633;E）上报非 cc 命令的开始/结束，cmdLine 仅 start 时有值
   onShellCommand?: (kind: 'start' | 'end', cmdLine?: string) => void
+  // 注入的启动命令跑完（pty-manager 把窗口标题设成 SHELL_READY_TITLE）
+  onShellReady?: () => void
   // 启动画面期间按 Ctrl+C / Esc：中断智能体启动
   onLaunchAbort?: () => void
   // 启动画面上点按钮 / 按回车
@@ -240,6 +243,9 @@ export class TerminalTab {
     this.bindOnData()
     this.bindClipboardOsc()
     this.bindShellIntegrationOsc()
+    this.term.onTitleChange((title) => {
+      if (title.includes(SHELL_READY_TITLE)) this.handlers.onShellReady?.()
+    })
   }
 
   mount(parent: HTMLElement): void {
@@ -567,8 +573,12 @@ export class TerminalTab {
       this.launchScreen.appendChild(btn)
       return
     }
-    this.launchScreen.insertAdjacentHTML('beforeend', '<div class="launch-spinner"></div><div class="launch-label"></div>')
-    this.launchScreen.querySelector('.launch-label')!.textContent = label
+    this.launchScreen.insertAdjacentHTML('beforeend', '<div class="launch-spinner"></div>')
+    if (!label) return
+    const el = document.createElement('div')
+    el.className = 'launch-label'
+    el.textContent = label
+    this.launchScreen.appendChild(el)
   }
 
   hideLaunchScreen(): void {
