@@ -1123,6 +1123,49 @@ async function doReloadTab(tabId: string): Promise<void> {
   }
 }
 
+// 挂起：结束 shell 与智能体、清空画面，停在启动画面等用户点恢复；下一层的临时会话一并关闭
+async function doSuspendTab(tabId: string): Promise<void> {
+  const ctx = findTab(tabId)
+  if (!ctx || isChildId(tabId) || reloadingTabs.has(tabId) || awaitingResume.has(tabId)) return
+  const { tab } = ctx
+  for (const c of [...(children.get(tabId) ?? [])]) {
+    closeChild(c.id)
+  }
+  endLaunchScreen(tabId)
+  launchAborted.delete(tabId)
+  awaitingResume.add(tabId)
+  tab.status = 'idle'
+  tab.note = undefined
+  tab.ccActive = false
+  if (downgradeTabId === tabId) clearDowngradeTimer()
+  window.term.clearTabState(tabId)
+  void op({ op: 'clearRunning', tabId })
+  refreshUI()
+  await tab.stopPty()
+  if (!awaitingResume.has(tabId)) return
+  if (activeTabId === tabId) {
+    await spawnTabPty(tab)
+  } else {
+    lazyTabs.add(tabId)
+  }
+}
+
+export function suspendTab(tabId: string): void {
+  const ctx = findTab(tabId)
+  if (!ctx) return
+  const { tab } = ctx
+  if (tab.status !== 'busy' && tab.status !== 'attention') {
+    void doSuspendTab(tabId)
+    return
+  }
+  confirmDialog({
+    title: t('挂起标签「{0}」？', tab.name),
+    message: t('挂起会中断正在进行的回合。'),
+    okLabel: t('挂起'),
+    onOk: () => void doSuspendTab(tabId)
+  })
+}
+
 export function reloadTab(tabId: string): void {
   const ctx = findTab(tabId)
   if (!ctx) return
@@ -1421,6 +1464,9 @@ export async function openTabCtx(tabId: string, x: number, y: number): Promise<v
       { label: t('在本组新建标签'), icon: icon('plus'), act: () => promptNewTabInGroup(ctx.group.id) },
       // 环境变量/cc 配置改完后就地换个新 PTY 生效，标签与会话都不动
       ...(suspended ? [] : [{ label: t('重新加载标签页'), icon: icon('rotate-ccw'), act: () => reloadTab(tabId) }]),
+      ...(!suspended && ctx.tab.autoLaunchCC && !isChildId(tabId)
+        ? [{ label: t('挂起会话'), icon: icon('memory-stick'), act: () => suspendTab(tabId) }]
+        : []),
       { label: t('复制标签页信息'), icon: icon('copy'), act: () => void copyTabInfo(tabId) },
       { sep: true },
       { label: t('关闭标签'), icon: icon('close'), danger: true, act: () => closeTab(tabId) }

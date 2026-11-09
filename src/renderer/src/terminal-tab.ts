@@ -739,6 +739,26 @@ export class TerminalTab {
     await this.startPty(true)
   }
 
+  // 挂起：等旧 PTY 退出，清空画面与回滚缓冲区；之后由 startPty 重新起
+  async stopPty(): Promise<void> {
+    if (this.disposed || this.reloading) return
+    const oldId = this.ptyId
+    this.ptyId = null
+    this.waitingForRestart = false
+    this.pendingInput = ''
+    if (oldId != null) {
+      try {
+        await window.term.killWait(oldId)
+      } catch {
+        window.term.kill(oldId)
+      }
+    }
+    if (this.disposed) return
+    this.term.reset()
+    this.disableReflow()
+    this.resetInputTrackingModes()
+  }
+
   refit(): void {
     const before = { cols: this.term.cols, rows: this.term.rows }
     try { this.fit.fit() } catch (e) { dbg(this.id, 'refit: fit threw', e) }
