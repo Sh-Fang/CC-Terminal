@@ -857,13 +857,26 @@ export async function newGroup(): Promise<void> {
     autoNameFromCwd: true,
     onPickCwd: (cur) => window.term.pickDirectory(cur || prefilledCwd),
     onOk: async (v) => {
-      const cwd = v.cwd?.trim() || ''
+      const cwd = normalizeCwd(v.cwd || '')
       const gid = await createGroup(v.name, cwd)
       const tab = await createTab(gid, v.tabName?.trim() || 'A', v.kind ?? 'terminal')
       await openNewTab(tab)
       rememberCwd(cwd)
     }
   })
+}
+
+// 路径统一成本机分隔符并去掉末尾分隔符；Windows 盘符大写，盘符根保留成 D:\
+function normalizeCwd(raw: string): string {
+  let p = raw.trim()
+  if (!p) return p
+  if (IS_WIN_PLATFORM) {
+    p = p.replace(/\//g, '\\').replace(/\\+$/, '').replace(/^[a-z]:/, (d) => d.toUpperCase())
+    return /^[A-Z]:$/.test(p) ? p + '\\' : p
+  } else {
+    p = p.replace(/\/+$/, '')
+    return p || '/'
+  }
 }
 
 // 磁盘根（D:\ 等）没有"最后一段"，美化成「D 盘」
@@ -876,7 +889,7 @@ function basenameOfPath(p: string): string {
 
 // 右键"在此处打开"：同 cwd 的运行中分组直接加标签，否则新建分组
 async function openHereWithPath(rawPath: string): Promise<void> {
-  const p = (rawPath || '').trim()
+  const p = normalizeCwd(rawPath || '')
   if (!p) return
   const exists = await window.term.pathExists(p)
   if (!exists) {
