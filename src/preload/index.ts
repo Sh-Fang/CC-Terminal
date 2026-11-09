@@ -125,6 +125,7 @@ export interface TermBridge {
   kill(id: number): void
   // 杀掉并等待进程真正退出（重新加载标签用）；超时也会 resolve
   killWait(id: number): Promise<boolean>
+  clearTabState(tabId: string): void
   openExternal(url: string): Promise<boolean>
   openPath(path: string): Promise<{ ok: boolean; error?: string }>
   storeLoad(): Promise<StoreSnapshot>
@@ -217,6 +218,7 @@ const api: TermBridge = {
   resize: (id, cols, rows) => ipcRenderer.send('pty:resize', { id, cols, rows }),
   kill: (id) => ipcRenderer.send('pty:kill', { id }),
   killWait: (id) => ipcRenderer.invoke('pty:killWait', { id }),
+  clearTabState: (tabId) => ipcRenderer.send('state:clear', { tabId }),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   openPath: (path) => ipcRenderer.invoke('shell:openPath', path),
   storeLoad: () => ipcRenderer.invoke('store:load'),

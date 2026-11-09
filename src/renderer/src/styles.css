@@ -461,6 +461,7 @@ body.col-resizing * { cursor: col-resize !important; user-select: none !importan
   line-height: 1;
 }
 .fg-ic.st-idle { color: var(--mute); }
+.fg-ic.fg-suspended { color: var(--mute); opacity: 0.45; }
 .fg-ic svg { display: block; }
 
 .trow-name {

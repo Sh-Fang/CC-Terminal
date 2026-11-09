@@ -1,5 +1,6 @@
 import { app, BrowserWindow as BrowserWindowClass, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, rmSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { request as httpsRequest } from 'node:https'
 import { request as httpRequest } from 'node:http'
 import { createPty, killPty, killPtyAndWait, resizePty, shellPids, writePty } from './pty-manager'
@@ -368,6 +369,12 @@ export function registerPtyIpc(
   ipcMain.on('pty:kill', (_e, p: { id: number }) => {
     ptyDbgLog(`kill id=${p.id}`)
     killPty(p.id)
+  })
+
+  // 删掉标签页的状态文件
+  ipcMain.on('state:clear', (_e, p: { tabId: string }) => {
+    if (!p || typeof p.tabId !== 'string' || !/^[\w-]+$/.test(p.tabId)) return
+    try { rmSync(join(getHookPaths().stateDir, `${p.tabId}.json`), { force: true }) } catch {}
   })
 
   // 重新加载标签：等旧 PTY 真退出再建新的（避免两个 cc 同时 --resume 同一会话）

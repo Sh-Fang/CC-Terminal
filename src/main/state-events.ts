@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFile, watch, type FSWatcher } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFile, readFileSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import { isTabStatus } from './session-constants'
 import { sendToMain } from './windows'
@@ -16,9 +16,12 @@ export class StateEventWatcher {
 
   start(): void {
     if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true })
-    // 启动时不补发已有状态，避免覆盖 renderer 内存中的更准状态
+    // 已有文件按当前内容记为已读：上次运行留下的状态不再发给同 id 的标签页
     for (const name of readdirSync(this.dir)) {
-      if (name.endsWith('.json')) this.files.set(name, { debounce: null, lastJson: '' })
+      if (!name.endsWith('.json')) continue
+      let raw = ''
+      try { raw = readFileSync(join(this.dir, name), { encoding: 'utf8' }) } catch {}
+      this.files.set(name, { debounce: null, lastJson: raw })
     }
     this.watcher = watch(this.dir, { persistent: false }, (_evt, filename) => {
       if (!filename) return
@@ -51,7 +54,10 @@ export class StateEventWatcher {
     st.debounce = null
     const full = join(this.dir, name)
     readFile(full, { encoding: 'utf8' }, (err, raw) => {
-      if (err) return
+      if (err) {
+        st.lastJson = ''
+        return
+      }
       if (raw === st.lastJson) return
       st.lastJson = raw
       let obj: Record<string, unknown>

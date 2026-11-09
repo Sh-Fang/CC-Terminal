@@ -161,9 +161,9 @@ function pushRemoteTabs(): void {
   }, 150)
 }
 
-// 手机上点「恢复会话」：在电脑上切到这个标签页，等 PTY 起来后照启动画面的按钮拉起智能体；
+// 手机上或右键菜单点「恢复会话」：在电脑上切到这个标签页，等 PTY 起来后照启动画面的按钮拉起智能体；
 // 智能体退回了 shell 提示符的，直接重新拉起
-async function remoteResume(tabId: string): Promise<void> {
+async function resumeTab(tabId: string): Promise<void> {
   const hit = findTab(tabId)
   if (!hit || !isCcTab(hit.tab)) {
     return
@@ -442,6 +442,16 @@ const LAUNCH_TIMEOUT_MS = 20000
 // 启动恢复的智能体标签页：首次起 PTY 时停在启动画面，点「恢复会话」才拉起智能体
 const awaitingResume = new Set<string>()
 
+/** 标签页是否挂起：停在启动画面等用户点恢复 */
+export function isSuspended(tab: TerminalTab): boolean {
+  return awaitingResume.has(tab.id)
+}
+
+/** 挂起的标签页恢复时要启动的智能体；没挂起返回 null */
+export function suspendedAgentOf(tab: TerminalTab): AgentKind | null {
+  return awaitingResume.has(tab.id) ? launchPlan(tab).agent : null
+}
+
 // 要启动的智能体，以及是否打算续上主会话（对话记录是否还在由 launchCC 再判断）
 function launchPlan(tab: TerminalTab, pick?: AgentKind): { agent: AgentKind; resume: boolean } {
   const top = tab.activeSessionId
@@ -482,6 +492,7 @@ function endLaunchScreen(tabId: string): void {
 function abortLaunch(tab: TerminalTab): void {
   if (awaitingResume.delete(tab.id)) {
     tab.hideLaunchScreen()
+    refreshUI()
     return
   }
   if (launchWatch.get(tab.id)?.sent === false) launchAborted.add(tab.id)
@@ -503,6 +514,7 @@ async function showResumePrompt(tab: TerminalTab): Promise<void> {
 
 function confirmResume(tab: TerminalTab): void {
   if (!awaitingResume.delete(tab.id)) return
+  refreshUI()
   beginLaunchScreenIfAuto(tab)
   if (tab.ptyId != null) void launchCC(tab)
 }
@@ -988,12 +1000,14 @@ function unmountTabs(ids: string[]): void {
     for (const tab of g.tabs.filter((x) => ids.includes(x.id))) {
       for (const c of children.get(tab.id) ?? []) {
         c.dispose()
+        window.term.clearTabState(c.id)
       }
       children.delete(tab.id)
       lazyTabs.delete(tab.id)
       awaitingResume.delete(tab.id)
       endLaunchScreen(tab.id)
       tab.dispose()
+      window.term.clearTabState(tab.id)
       if (downgradeTabId === tab.id) clearDowngradeTimer()
     }
     if (activeTabId && isChildId(activeTabId) && ids.some((x) => activeTabId!.startsWith(x + CHILD_SEP))) {
@@ -1032,6 +1046,7 @@ function closeChild(childId: string): void {
   const child = list.find((x) => x.id === childId)
   if (!child) return
   child.dispose()
+  window.term.clearTabState(childId)
   children.set(parentId, list.filter((x) => x !== child))
   void op({ op: 'clearRunning', tabId: childId })
   if (activeTabId === childId) {
@@ -1349,17 +1364,21 @@ export function markTabViewed(tabId: string): void {
 export async function openTabCtx(tabId: string, x: number, y: number): Promise<void> {
   const found = findTab(tabId)
   if (!found) return
+  const suspended = isSuspended(found.tab)
   // 前台程序是 shell 本身（底下没有子程序）才能启动智能体；只列找得到的
-  const agents = !isChildId(tabId) && foregroundOf(found.tab).atPrompt ? await availableAgents() : []
+  const agents = !suspended && !isChildId(tabId) && foregroundOf(found.tab).atPrompt ? await availableAgents() : []
   const ctx = findTab(tabId)
   if (!ctx) return
   // idle → 可标"待查看"；done/attention/error → 可标"已查看"；busy 都不给
   const s = ctx.tab.status ?? 'idle'
   const items: CtxItem[] = []
-  if (s === 'idle') {
+  if (suspended) {
+    items.push({ label: t('恢复会话'), icon: icon('rotate-cw'), act: () => void resumeTab(tabId) })
+  } else if (s === 'idle') {
     items.push({ label: t('标记为待查看'), icon: icon('check-square'), act: () => markTabPending(tabId) })
   } else if (s === 'done' || s === 'attention' || s === 'error') {
     items.push({ label: t('标记为已查看'), icon: icon('square'), act: () => markTabViewed(tabId) })
+  } else {
   }
   if (items.length > 0) {
     items.push({ sep: true })
@@ -1401,7 +1420,7 @@ export async function openTabCtx(tabId: string, x: number, y: number): Promise<v
         : { label: t('删除备注'), icon: icon('sticky-note'), danger: true, act: () => void op({ op: 'setMemo', id: tabId, memo: null }) },
       { label: t('在本组新建标签'), icon: icon('plus'), act: () => promptNewTabInGroup(ctx.group.id) },
       // 环境变量/cc 配置改完后就地换个新 PTY 生效，标签与会话都不动
-      { label: t('重新加载标签页'), icon: icon('rotate-ccw'), act: () => reloadTab(tabId) },
+      ...(suspended ? [] : [{ label: t('重新加载标签页'), icon: icon('rotate-ccw'), act: () => reloadTab(tabId) }]),
       { label: t('复制标签页信息'), icon: icon('copy'), act: () => void copyTabInfo(tabId) },
       { sep: true },
       { label: t('关闭标签'), icon: icon('close'), danger: true, act: () => closeTab(tabId) }
@@ -1808,7 +1827,10 @@ async function restoreOpenTabs(): Promise<void> {
   // 只起当前标签，其余等首次激活
   for (const x of tabs) {
     if (x.id !== want) lazyTabs.add(x.id)
-    if (x.autoLaunchCC) awaitingResume.add(x.id)
+    if (x.autoLaunchCC) {
+      awaitingResume.add(x.id)
+      window.term.clearTabState(x.id)
+    }
   }
   await spawnTabPty(tabs.find((x) => x.id === want)!)
 }
@@ -1833,7 +1855,7 @@ export async function initApp(): Promise<void> {
   // 远程访问：开关状态决定是否推标签页；手机要屏幕快照时取缓冲区末尾的文字
   window.term.onRemoteBrief(setRemoteEnabled)
   void window.term.remoteBrief().then(setRemoteEnabled)
-  window.term.onRemoteResume((tabId) => void remoteResume(tabId))
+  window.term.onRemoteResume((tabId) => void resumeTab(tabId))
   // 手机打开了启动后还没点开过的标签页：在电脑上切过去，终端照常拉起
   window.term.onRemoteWake((tabId) => {
     if (lazyTabs.has(tabId)) {
@@ -1900,7 +1922,7 @@ export async function initApp(): Promise<void> {
   // ─── 状态徽标事件 ───────────────────────────────────────────────
   const offState = window.term.onStateEvent((ev) => {
     const ctx = findTab(ev.tabId)
-    if (!ctx) return
+    if (!ctx || isSuspended(ctx.tab)) return
     // StopFailure 的错误分类优先出中文短句；分类缺失/不认识时退回 cc 原文（英文长句，截断显示）
     if (ev.state === 'error') {
       ctx.tab.status = 'error'
