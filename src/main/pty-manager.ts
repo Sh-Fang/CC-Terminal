@@ -3,12 +3,18 @@
 import * as pty from '@lydell/node-pty'
 import { existsSync } from 'node:fs'
 import { basename } from 'node:path'
+import { release } from 'node:os'
 import { execSync } from 'node:child_process'
 import { snapshotCurrentEnv } from './sys-env'
 import { SHELL_READY_TITLE } from '../shared/shell-ready'
 
 const IS_WIN = process.platform === 'win32'
 const PWSH_PRIMARY = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'
+
+// Win10（内部版本 < 22000）系统自带的旧 ConPTY 会吞掉程序发的隐藏光标（CSI ?25l），
+// cc 自绘光标时真实光标仍显示在输入行首，压住第一格、出现两个光标；
+// 改用 node-pty 自带的新版 conpty.dll + OpenConsole.exe，Win11 继续用系统 ConPTY
+const USE_BUNDLED_CONPTY = IS_WIN && Number(release().split('.')[2] ?? 0) < 22000
 
 function resolvePwsh(): string {
   if (existsSync(PWSH_PRIMARY)) return PWSH_PRIMARY
@@ -98,7 +104,11 @@ export function createPty(
     cwd,
     env
   }
-  if (IS_WIN) (spawnOpts as pty.IWindowsPtyForkOptions).useConpty = true
+  if (IS_WIN) {
+    const winOpts = spawnOpts as pty.IWindowsPtyForkOptions
+    winOpts.useConpty = true
+    if (USE_BUNDLED_CONPTY) winOpts.useConptyDll = true
+  }
 
   const proc = pty.spawn(shellInfo.file, args, spawnOpts)
 
