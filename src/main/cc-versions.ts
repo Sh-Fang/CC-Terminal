@@ -146,8 +146,31 @@ function findNpmInvocation(): NpmInvocation | null {
   if (nodeExe) {
     const cli = join(dirname(nodeExe), 'node_modules', 'npm', 'bin', 'npm-cli.js')
     if (existsSync(cli)) return { file: nodeExe, lead: [cli] }
+    // PATH 上的 node.exe / npm.exe 可能是转发壳（如 nvm for Windows 2.x 的 .nodejs 目录、volta），
+    // 旁边没有 node_modules；让它报出真实 node 路径，再到真实目录下找 npm-cli.js
+    const realNode = realNodePath(nodeExe)
+    if (realNode) {
+      const realCli = join(dirname(realNode), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+      if (existsSync(realCli)) return { file: realNode, lead: [realCli] }
+    }
   }
+  // 兜底：npm 本身是 .exe（转发壳）时可直接 spawn，不受 .cmd 限制
+  if (/\.exe$/i.test(npmCmd)) return { file: npmCmd, lead: [] }
   return null
+}
+
+function realNodePath(nodeExe: string): string | null {
+  try {
+    const out = execFileSync(nodeExe, ['-p', 'process.execPath'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 10000,
+      env: snapshotCurrentEnv()
+    }).trim()
+    return out && existsSync(out) ? out : null
+  } catch {
+    return null
+  }
 }
 
 // registry URL 白名单校验，挡掉 shell 元字符
