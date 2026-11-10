@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { CODEX_PROFILE, codexHome } from './codex-helper'
+import { whereOnCurrentPath } from './sys-env'
 
 export interface HookPaths {
   ccHooksJson: string
@@ -20,14 +21,7 @@ export interface HookPaths {
 // macOS GUI 进程 PATH 极简，需借登录+交互 shell 解析。
 function detectNodePath(): string {
   if (process.platform === 'win32') {
-    try {
-      const out = execFileSync('where', ['node'], { encoding: 'utf8', windowsHide: true })
-        .split(/\r?\n/)
-        .map((s) => s.trim())
-        .filter(Boolean)
-      if (out[0]) return out[0]
-    } catch {}
-    return 'node'
+    return whereOnCurrentPath('node.exe').find((p) => existsSync(p)) ?? 'node'
   }
   try {
     const shell = process.env.SHELL || '/bin/zsh'

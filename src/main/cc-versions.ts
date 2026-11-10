@@ -3,6 +3,7 @@ import { execFile, execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { AgentKind } from '../shared/store-types'
+import { snapshotCurrentEnv, whereOnCurrentPath } from './sys-env'
 
 // 智能体多版本管理：每版装到 <userData>/<目录>/<version>/（npm install -g --prefix 隔离），
 // 切换 = 把 settings.claudePath / codexPath 指向对应可执行文件；登录态在各自家目录全局共享，不用重登。
@@ -104,39 +105,34 @@ function cmpSemver(a: string, b: string): number {
   return 0
 }
 
-// 找系统 npm；结果缓存到进程生命周期
-let cachedNpm: string | null | undefined
+// 找系统 npm；找到的结果缓存到文件被删，找不到每次重查（应用开着时才装 Node 也能找到）
+let cachedNpm: string | null = null
 export function detectNpm(): string | null {
-  if (cachedNpm !== undefined) return cachedNpm
+  if (cachedNpm && existsSync(cachedNpm)) return cachedNpm
   if (!IS_WIN) {
     cachedNpm = whichViaLoginShell('npm')
     return cachedNpm
   }
-  const tryOne = (name: string): string | null => {
-    try {
-      const out = execFileSync('where.exe', [name], { encoding: 'utf8', windowsHide: true })
-      const line = out.split(/\r?\n/).map((l) => l.trim()).find((l) => l && existsSync(l))
-      return line || null
-    } catch {
-      return null
-    }
-  }
-  cachedNpm = tryOne('npm.cmd') || tryOne('npm') || null
+  const tryOne = (name: string): string | null =>
+    whereOnCurrentPath(name).find((l) => existsSync(l)) ?? null
+  cachedNpm = tryOne('npm.cmd') || tryOne('npm')
   return cachedNpm
 }
 
 // npm 调用形式 spawn(file, [...lead, ...args])。Windows 上 Node 20+ 因 CVE-2024-27980
 // 禁止直接 spawn .cmd，改用 node.exe + npm-cli.js 跑（兼容 nvm4w / msi / winget 布局）。
 interface NpmInvocation { file: string; lead: string[] }
-let cachedInvoke: NpmInvocation | null | undefined
+let cachedInvoke: NpmInvocation | null = null
 function resolveNpmInvocation(): NpmInvocation | null {
-  if (cachedInvoke !== undefined) return cachedInvoke
+  if (cachedInvoke && existsSync(cachedInvoke.file)) return cachedInvoke
+  cachedInvoke = findNpmInvocation()
+  return cachedInvoke
+}
+
+function findNpmInvocation(): NpmInvocation | null {
   const npmCmd = detectNpm()
-  if (!npmCmd) { cachedInvoke = null; return null }
-  if (!IS_WIN) {
-    cachedInvoke = { file: npmCmd, lead: [] }
-    return cachedInvoke
-  }
+  if (!npmCmd) return null
+  if (!IS_WIN) return { file: npmCmd, lead: [] }
   const dir = dirname(npmCmd)
   const candidates: Array<{ node: string; cli: string }> = [
     { node: join(dir, 'node.exe'), cli: join(dir, 'node_modules', 'npm', 'bin', 'npm-cli.js') },
@@ -144,20 +140,13 @@ function resolveNpmInvocation(): NpmInvocation | null {
     { node: join(dir, 'node.exe'), cli: join(dir, 'node_modules', 'npm', 'lib', 'npm.js') }
   ]
   for (const c of candidates) {
-    if (existsSync(c.node) && existsSync(c.cli)) {
-      cachedInvoke = { file: c.node, lead: [c.cli] }
-      return cachedInvoke
-    }
+    if (existsSync(c.node) && existsSync(c.cli)) return { file: c.node, lead: [c.cli] }
   }
-  try {
-    const out = execFileSync('where.exe', ['node.exe'], { encoding: 'utf8', windowsHide: true })
-    const nodeExe = out.split(/\r?\n/).map((l) => l.trim()).find((l) => l && existsSync(l))
-    if (nodeExe) {
-      const cli = join(dirname(nodeExe), 'node_modules', 'npm', 'bin', 'npm-cli.js')
-      if (existsSync(cli)) { cachedInvoke = { file: nodeExe, lead: [cli] }; return cachedInvoke }
-    }
-  } catch {}
-  cachedInvoke = null
+  const nodeExe = whereOnCurrentPath('node.exe').find((l) => existsSync(l))
+  if (nodeExe) {
+    const cli = join(dirname(nodeExe), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+    if (existsSync(cli)) return { file: nodeExe, lead: [cli] }
+  }
   return null
 }
 
@@ -240,7 +229,7 @@ export async function listRemote(agent: AgentKind, registry: string): Promise<st
     execFile(
       inv.file,
       [...inv.lead, 'view', AGENTS[agent].pkg, 'versions', '--json', `--registry=${reg}`],
-      { encoding: 'utf8', windowsHide: true, maxBuffer: 20 * 1024 * 1024 },
+      { encoding: 'utf8', windowsHide: true, maxBuffer: 20 * 1024 * 1024, env: snapshotCurrentEnv() },
       (err, stdout, stderr) => {
         if (err) return reject(new Error(stderr?.trim() || err.message))
         try {
@@ -300,7 +289,7 @@ export function install(
   ]
   onPhase('准备…')
   return new Promise((resolve) => {
-    const p = spawn(inv.file, args, { windowsHide: true })
+    const p = spawn(inv.file, args, { windowsHide: true, env: snapshotCurrentEnv() })
     const state: InflightInstall = { proc: p, prefix, createdDir, cancelled: false }
     inflightInstalls.set(key, state)
     const cleanupOnFail = (): void => {

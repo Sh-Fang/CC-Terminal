@@ -20,6 +20,8 @@ export interface LaunchOptions {
   args?: string[]
   // 沿用已有的 userData（第二次启动同一份数据时用）
   userData?: string
+  // 覆盖应用继承的环境变量
+  env?: Record<string, string>
 }
 
 /** 一个运行中的应用实例 */
@@ -74,7 +76,7 @@ export async function launchApp(opts: LaunchOptions = {}): Promise<AppHandle> {
   const app = await _electron.launch({
     args: [REPO_ROOT, ...(opts.args ?? [])],
     cwd: REPO_ROOT,
-    env: cleanEnv({ TERMINAL_ISOLATE_DIR: userData }),
+    env: cleanEnv({ ...(opts.env ?? {}), TERMINAL_ISOLATE_DIR: userData }),
     timeout: 60_000
   })
   const errors: string[] = []

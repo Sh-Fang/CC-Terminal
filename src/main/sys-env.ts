@@ -164,6 +164,20 @@ export function snapshotCurrentEnv(force = false): Record<string, string> {
   return { ...env }
 }
 
+// Windows 上按注册表当前 PATH 查命令，返回 where.exe 列出的全部候选；找不到返回空数组
+export function whereOnCurrentPath(name: string): string[] {
+  try {
+    const out = execFileSync('where.exe', [name], {
+      encoding: 'utf8',
+      windowsHide: true,
+      env: snapshotCurrentEnv()
+    })
+    return out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 export async function applyDisableAutoupdater(enabled: boolean): Promise<{
   ok: boolean
   systemWide: boolean

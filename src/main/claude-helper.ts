@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import type { AgentKind } from '../shared/store-types'
 import { loadSettings } from './settings'
+import { whereOnCurrentPath } from './sys-env'
 
 export { sessionExists } from './claude-paths'
 
@@ -30,25 +31,17 @@ export function detectAgentPath(agent: AgentKind): string | null {
     const cands = whichAllViaLoginShell(agent)
     return cands[0] ?? null
   }
-  try {
-    const out = execFileSync('where.exe', [agent], { encoding: 'utf8', windowsHide: true })
-    const cands = out
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0)
-    if (cands.length === 0) return null
-    const score = (p: string): number => {
-      const ext = p.toLowerCase().match(/\.[a-z]+$/)?.[0] ?? ''
-      if (ext === '.cmd') return 3
-      if (ext === '.ps1') return 2
-      if (ext === '.exe') return 1
-      return 0
-    }
-    cands.sort((a, b) => score(b) - score(a))
-    return cands[0]
-  } catch {
-    return null
+  const cands = whereOnCurrentPath(agent)
+  if (cands.length === 0) return null
+  const score = (p: string): number => {
+    const ext = p.toLowerCase().match(/\.[a-z]+$/)?.[0] ?? ''
+    if (ext === '.cmd') return 3
+    if (ext === '.ps1') return 2
+    if (ext === '.exe') return 1
+    return 0
   }
+  cands.sort((a, b) => score(b) - score(a))
+  return cands[0]
 }
 
 // PATH 查找结果短时缓存：打开设置、新建标签页、右键菜单会连着问，类 Unix 走登录 shell 较慢
