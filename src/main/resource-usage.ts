@@ -86,7 +86,8 @@ function loadWinApi(): WinUsageApi {
         const pmc = {} as Record<string, unknown>
         let mem = 0
         if (memInfo(h, pmc, sizeEx2)) {
-          mem = Number(pmc.PrivateWorkingSetSize)
+          // Win10 22H2 之前的系统会接受 EX2 大小但不填末尾字段，读到 0 时改取工作集
+          mem = Number(pmc.PrivateWorkingSetSize) || Number(pmc.WorkingSetSize)
         } else if (memInfo(h, pmc, sizeEx)) {
           mem = Number(pmc.WorkingSetSize)
         } else {
