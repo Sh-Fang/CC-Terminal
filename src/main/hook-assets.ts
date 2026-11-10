@@ -286,36 +286,41 @@ export function ensureHookAssets(): HookPaths {
   writeZshDotDir(zshDotDir, zshProfile)
 
   const nodePath = detectNodePath()
-  const sessionCmd = `"${nodePath}" "${sessionProbeJs}" "${eventsDir}"`
-  const stateCmd = (st: string): string =>
-    `"${nodePath}" "${stateProbeJs}" "${stateDir}" ${st}`
+  // Windows 上 cc 可能用 Git Bash 或 PowerShell 跑 shell 形式的命令，引号开头的命令在 PowerShell 里不会执行；
+  // 改用 args 形式直接起 node，不经过任何 shell
+  const hookCmd = (args: string[]): Record<string, unknown> =>
+    process.platform === 'win32'
+      ? { type: 'command', command: nodePath, args }
+      : { type: 'command', command: [nodePath, ...args].map((a) => `"${a}"`).join(' ') }
+  const sessionCmd = hookCmd([sessionProbeJs, eventsDir])
+  const stateCmd = (st: string): Record<string, unknown> => hookCmd([stateProbeJs, stateDir, st])
 
   const settings = {
     // app 自己管理标签页与会话；cc 的 Agent view 会把会话转到后台进程，丢掉 TERMINAL_TAB_ID 导致状态失联
     disableAgentView: true,
     hooks: {
       SessionStart: [
-        { matcher: '', hooks: [{ type: 'command', command: sessionCmd }] }
+        { matcher: '', hooks: [sessionCmd] }
       ],
       UserPromptSubmit: [
-        { matcher: '', hooks: [{ type: 'command', command: stateCmd('busy') }] }
+        { matcher: '', hooks: [stateCmd('busy')] }
       ],
       Stop: [
-        { matcher: '', hooks: [{ type: 'command', command: stateCmd('done') }] }
+        { matcher: '', hooks: [stateCmd('done')] }
       ],
       // 本轮因 API 错误结束 → 红点。这是判定 API 出错的唯一可靠信号：cc 内部重试
       // （实测最多 10 次、可长达 3 分钟）全程不发任何 hook，重试成功也不会发本事件，
       // 所以挂上它之后，重试中间态不再被误判成错误（那是 terminal-tab 扫文本的老毛病）。
       // stdin 带 error（错误分类）与 last_assistant_message（错误文案），state-probe 都取走。
       StopFailure: [
-        { matcher: '', hooks: [{ type: 'command', command: stateCmd('error') }] }
+        { matcher: '', hooks: [stateCmd('error')] }
       ],
       PostToolUse: [
-        { matcher: '', hooks: [{ type: 'command', command: stateCmd('busy') }] }
+        { matcher: '', hooks: [stateCmd('busy')] }
       ],
       Notification: [
-        { matcher: 'permission_prompt', hooks: [{ type: 'command', command: stateCmd('attention') }] },
-        { matcher: 'elicitation_dialog', hooks: [{ type: 'command', command: stateCmd('attention') }] }
+        { matcher: 'permission_prompt', hooks: [stateCmd('attention')] },
+        { matcher: 'elicitation_dialog', hooks: [stateCmd('attention')] }
         // 不挂 idle_prompt：它会把绿点（done）静默盖回灰点；idle 只由 renderer 降级倒计时产生
       ]
     }

@@ -1,4 +1,6 @@
 // 基础冒烟：启动无报错、新建终端标签页能起 shell 并回显、关闭标签页 / 关闭分组的确认框
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { test, expect } from './helpers/app'
 import { freshDir } from './helpers/paths'
 import { buildStore, readStore } from './helpers/store-fixture'
@@ -113,4 +115,24 @@ test('关闭标签页与关闭分组都先弹确认框', async ({ launch }) => {
   await answerConfirm(page, true)
   await expect(groupHead(page, 'g_close')).toHaveCount(0)
   await expect.poll(() => readStore(h.userData).groups.find((x) => x.id === 'g_close')?.closed).toBe(true)
+})
+
+test('生成的 cc 钩子在 Windows 上直接起 node，不经过 shell', async ({ launch }) => {
+  test.skip(process.platform !== 'win32', '只校验 Windows')
+  const cwd = freshDir('cwd')
+  const h = await launch({
+    store: buildStore({ groups: [{ id: 'g_hooks', name: 'Hooks', cwd, tabs: [{ id: 't_hooks', name: 'Hooks' }] }] })
+  })
+  await waitShellPrompt(h.page, 't_hooks')
+
+  const settings = JSON.parse(readFileSync(join(h.userData, 'cc-hooks.json'), 'utf8'))
+  const entries = Object.values(settings.hooks as Record<string, { hooks: { command: string; args?: string[] }[] }[]>)
+    .flat()
+    .flatMap((m) => m.hooks)
+  expect(entries.length).toBeGreaterThan(0)
+  for (const e of entries) {
+    // command 是 node 本身，不带引号；探针脚本和参数都放在 args 里
+    expect(e.command).not.toContain('"')
+    expect(e.args?.[0]).toMatch(/(session|state)-probe\.cjs$/)
+  }
 })
