@@ -65,7 +65,7 @@ export async function waitClaudeReady(page: Page, tabId: string, timeout = 90_00
       // 默认选中的是「No, exit」，往下移到「Yes, I trust this folder」再确认
       await focusTerm(page, tabId)
       await page.keyboard.press('ArrowDown')
-      await expect.poll(() => screenText(page, tabId), { timeout: 5_000 }).toMatch(/❯\s*Yes, I trust/)
+      await expect.poll(() => screenText(page, tabId), { timeout: 5_000 }).toMatch(/[❯>]\s*Yes, I trust/)
       await page.keyboard.press('Enter')
       await expect.poll(() => screenText(page, tabId), { timeout: 15_000 }).not.toMatch(TRUST_RE)
       continue
