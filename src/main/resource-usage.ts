@@ -1,5 +1,5 @@
 // 资源占用采样：按进程树汇总应用自身与各标签页 shell 的 CPU、内存。
-// CPU 取两次采样间累计 CPU 时间的差值，换算成占整机的百分比；内存 Windows 取独占工作集，类 Unix 取 RSS。
+// CPU 取最近 10 秒内累计 CPU 时间的增量，换算成占整机的百分比；内存 Windows 取独占工作集，类 Unix 取 RSS。
 // Windows 用 koffi 调系统接口；Linux 读 /proc；macOS 用 ps。
 import { execFile } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -19,6 +19,8 @@ interface ProcStat {
 // 距上次采样超过这个间隔就先补采一次，避免拿长时间的平均值充当当前值
 const STALE_MS = 5000
 const PRIME_MS = 300
+// CPU 平滑窗口
+const WINDOW_MS = 10000
 
 // ─── Windows ─────────────────────────────
 interface WinStat {
@@ -166,8 +168,13 @@ function listMac(): Promise<ProcStat[]> {
 }
 
 // ─── 汇总 ─────────────────────────────
-// 上一轮每个进程的累计 CPU 时间，及上一轮的采样时刻
-let prevCpu = new Map<number, number>()
+// 一轮采样：采样时刻，及当时每个进程的累计 CPU 时间
+interface Round {
+  at: number
+  cpu: Map<number, number>
+}
+// 窗口内的历史轮次，按时间从早到晚
+let rounds: Round[] = []
 let prevAt = 0
 
 async function listProcs(): Promise<ProcStat[]> {
@@ -260,10 +267,15 @@ async function sampleOnce(shellPids: Map<number, number>): Promise<UsageSample> 
   }
 
   const now = Date.now()
-  const span = (now - prevAt) * cpus().length
+  // 起点取窗口边界前最近的一轮，更早的丢掉
+  while (rounds.length > 1 && now - rounds[1].at >= WINDOW_MS) {
+    rounds.shift()
+  }
+  const cores = cpus().length
   const nextCpu = new Map<number, number>()
   const sum = (pids: number[]): Usage => {
-    let cpu = 0
+    // 各进程从窗口内最早出现的那一轮起算平均占用，再累加
+    let rate = 0
     let mem = 0
     for (const pid of pids) {
       const p = byPid.get(pid)
@@ -272,12 +284,12 @@ async function sampleOnce(shellPids: Map<number, number>): Promise<UsageSample> 
       }
       nextCpu.set(pid, p.cpuMs)
       mem += p.mem
-      const before = prevCpu.get(pid)
-      if (before != null && span > 0) {
-        cpu += Math.max(0, p.cpuMs - before)
+      const base = rounds.find((r) => r.cpu.has(pid))
+      if (base && now > base.at) {
+        rate += Math.max(0, p.cpuMs - base.cpu.get(pid)!) / (now - base.at)
       }
     }
-    return { cpu: span > 0 ? Math.min(100, (cpu / span) * 100) : 0, mem }
+    return { cpu: Math.min(100, (rate / cores) * 100), mem }
   }
 
   const app = sum(appPids)
@@ -285,7 +297,7 @@ async function sampleOnce(shellPids: Map<number, number>): Promise<UsageSample> 
   for (const [id, pids] of ptyPids) {
     ptys[id] = sum(pids)
   }
-  prevCpu = nextCpu
+  rounds.push({ at: now, cpu: nextCpu })
   prevAt = now
   return { app, ptys }
 }
@@ -293,6 +305,7 @@ async function sampleOnce(shellPids: Map<number, number>): Promise<UsageSample> 
 // 渲染层轮询调用；距上次太久（或首次）先补采一次，让 CPU 有一个短区间的差值可算
 export async function sampleUsage(shellPids: Map<number, number>): Promise<UsageSample> {
   if (Date.now() - prevAt > STALE_MS) {
+    rounds = []
     await sampleOnce(shellPids)
     await new Promise((r) => setTimeout(r, PRIME_MS))
   }
